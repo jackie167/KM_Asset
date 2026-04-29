@@ -9,13 +9,13 @@ import type { HoldingItem } from "@/pages/assets/types";
 
 const FORECAST_YEARS = [2026, 2027, 2028, 2029, 2030];
 const INITIAL_2026_FREE_CASH = 7_370_845_000;
-const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto", "bond"] as const;
+const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto"] as const;
 type InvestType = typeof INVEST_TYPES[number];
 
-const DEFAULT_RATES: Record<InvestType, number> = { cash: 4, stock: 15, gold: 8, fund: 9, crypto: 15, bond: 7 };
-const TYPE_LABELS: Record<InvestType, string> = { cash: "Cash", stock: "Stock", gold: "Gold", fund: "Fund", crypto: "Crypto", bond: "Bond" };
-const DEFAULT_ALLOCATION_RATIOS: Record<InvestType, number> = { cash: 10, gold: 30, fund: 10, crypto: 10, stock: 40, bond: 0 };
-const SYMBOL_TYPE_MAP: Record<string, InvestType> = { cash: "cash", stock: "stock", gold: "gold", fund: "fund", crypto: "crypto", bond: "bond" };
+const DEFAULT_RATES: Record<InvestType, number> = { cash: 4, stock: 15, gold: 8, fund: 9, crypto: 15 };
+const TYPE_LABELS: Record<InvestType, string> = { cash: "Cash", stock: "Stock", gold: "Gold", fund: "Fund", crypto: "Crypto" };
+const DEFAULT_ALLOCATION_RATIOS: Record<InvestType, number> = { cash: 10, gold: 30, fund: 10, crypto: 10, stock: 40 };
+const SYMBOL_TYPE_MAP: Record<string, InvestType> = { cash: "cash", stock: "stock", gold: "gold", fund: "fund", crypto: "crypto" };
 
 function isInvestType(value: string): value is InvestType {
   return INVEST_TYPES.includes(value as InvestType);
