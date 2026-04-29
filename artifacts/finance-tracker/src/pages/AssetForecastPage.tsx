@@ -675,7 +675,7 @@ export default function AssetForecastPage() {
 
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast 2026</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast 2026-2030</p>
             <p className="text-[10px] text-muted-foreground">Mỗi tài sản chỉ hiển thị đầu năm và cuối năm</p>
           </div>
           <Card className="overflow-hidden">
@@ -715,19 +715,21 @@ export default function AssetForecastPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  <tr className="bg-primary/5">
-                    <td className="py-2.5 px-4 font-medium">2026</td>
-                    {(firstForecast?.investmentDetails ?? []).map((row) => (
-                      <Fragment key={`${row.type}-values`}>
-                        <td key={`${row.type}-start`} className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">
-                          {formatVNDFull(row.valueBeforeReturn)}
-                        </td>
-                        <td key={`${row.type}-end`} className="py-2.5 px-4 text-right tabular-nums font-semibold whitespace-nowrap">
-                          {formatVNDFull(row.endValue)}
-                        </td>
-                      </Fragment>
-                    ))}
-                  </tr>
+                  {forecastRows.map((yearRow) => (
+                    <tr key={yearRow.year} className={yearRow.year === 2026 || yearRow.year === 2027 ? "bg-primary/5" : undefined}>
+                      <td className="py-2.5 px-4 font-medium">{yearRow.year}</td>
+                      {yearRow.investmentDetails.map((row) => (
+                        <Fragment key={`${yearRow.year}-${row.type}-values`}>
+                          <td key={`${row.type}-start`} className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">
+                            {formatVNDFull(row.valueBeforeReturn)}
+                          </td>
+                          <td key={`${row.type}-end`} className="py-2.5 px-4 text-right tabular-nums font-semibold whitespace-nowrap">
+                            {formatVNDFull(row.endValue)}
+                          </td>
+                        </Fragment>
+                      ))}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
