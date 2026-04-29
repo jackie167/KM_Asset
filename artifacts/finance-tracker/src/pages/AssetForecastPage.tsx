@@ -673,8 +673,8 @@ export default function AssetForecastPage() {
 
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast</p>
-            <p className="text-[10px] text-muted-foreground">Từ sheet {CURRENT_ASSET_SHEET}, chưa dùng live Investment</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast 2026</p>
+            <p className="text-[10px] text-muted-foreground">Chỉ giữ 2026 để chỉnh và debug</p>
           </div>
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -692,32 +692,28 @@ export default function AssetForecastPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {forecastRows.flatMap((yearRow) => yearRow.investmentDetails.map((row) => (
-                    <tr key={`${yearRow.year}-${row.type}`} className={yearRow.year === 2026 || yearRow.year === 2027 ? "bg-primary/5" : undefined}>
-                      <td className="py-2.5 px-4 font-medium">{yearRow.year}</td>
+                  {(firstForecast?.investmentDetails ?? []).map((row) => (
+                    <tr key={`2026-${row.type}`} className="bg-primary/5">
+                      <td className="py-2.5 px-4 font-medium">2026</td>
                       <td className="py-2.5 px-4 font-medium">{row.label}</td>
                       <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.startValue)}</td>
                       <td className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${row.allocationValue >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.allocationValue)}</td>
                       <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.valueBeforeReturn)}</td>
                       <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                        {yearRow.year === 2026 ? (
-                          <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
-                            <input
-                              value={investmentReturnInputs[row.type] ?? String(DEFAULT_RATES[row.type])}
-                              onChange={(event) => saveInvestmentReturnInput(row.type, event.target.value)}
-                              inputMode="decimal"
-                              className="w-12 bg-transparent text-right text-[11px] tabular-nums outline-none"
-                            />
-                            <span className="text-[10px] text-muted-foreground">%</span>
-                          </div>
-                        ) : (
-                          <span className="tabular-nums text-muted-foreground">{formatPercentValue(row.returnRate * 100)}</span>
-                        )}
+                        <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
+                          <input
+                            value={investmentReturnInputs[row.type] ?? String(DEFAULT_RATES[row.type])}
+                            onChange={(event) => saveInvestmentReturnInput(row.type, event.target.value)}
+                            inputMode="decimal"
+                            className="w-12 bg-transparent text-right text-[11px] tabular-nums outline-none"
+                          />
+                          <span className="text-[10px] text-muted-foreground">%</span>
+                        </div>
                       </td>
                       <td className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${row.gain >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.gain)}</td>
                       <td className="py-2.5 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.endValue)}</td>
                     </tr>
-                  )))}
+                  ))}
                 </tbody>
               </table>
             </div>
