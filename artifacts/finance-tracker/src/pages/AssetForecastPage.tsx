@@ -28,7 +28,8 @@ function getInvestmentType(holding: HoldingItem): InvestType | null {
 }
 
 function isUnallocatedFreeCash(holding: HoldingItem) {
-  return holding.symbol.trim().toLowerCase() === "free cash";
+  const normalizedSymbol = holding.symbol.trim().toLowerCase().replace(/[\s_-]+/g, "");
+  return getInvestmentType(holding) === "cash" || normalizedSymbol === "freecash";
 }
 
 type FreeCashRow = {
@@ -326,6 +327,7 @@ export default function AssetForecastPage() {
   const firstForecast = forecastRows[0];
   const lastForecast = forecastRows[forecastRows.length - 1];
   const currentAssetTotal = currentAssetRows.reduce((sum, holding) => {
+    if (isUnallocatedFreeCash(holding)) return sum;
     const valueInput = assetValueInputs[assetValueKey(holding)];
     return sum + (valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput));
   }, 0);
