@@ -605,7 +605,8 @@ export default function AssetForecastPage() {
                       <th className="py-2 px-4 text-right font-medium">Weight</th>
                       <th className="py-2 px-4 text-right font-medium">Assumed return</th>
                       <th className="py-2 px-4 text-right font-medium">Growth</th>
-                      <th className="py-2 pl-4 text-right font-medium">End value</th>
+                      <th className="py-2 px-4 text-right font-medium">2026</th>
+                      <th className="py-2 pl-4 text-right font-medium">2027</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
@@ -613,7 +614,8 @@ export default function AssetForecastPage() {
                       const weight = currentAssetTotal > 0 ? row.startValue / currentAssetTotal : null;
                       const firstYearDetail = firstForecast?.fixedDetails.find((detail) => detail.key === row.key);
                       const growth = firstYearDetail?.gain ?? row.startValue * row.returnRate;
-                      const endingValue = firstYearDetail?.endValue ?? row.startValue + growth;
+                      const end2026 = firstYearDetail?.endValue ?? row.startValue + growth;
+                      const end2027 = end2026 * (1 + row.returnRate);
 
                       return (
                         <tr key={row.key}>
@@ -647,7 +649,8 @@ export default function AssetForecastPage() {
                           <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${growth >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                             {formatVNDFull(growth)}
                           </td>
-                          <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(endingValue)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2026)}</td>
+                          <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2027)}</td>
                         </tr>
                       );
                     })}
@@ -664,7 +667,8 @@ export default function AssetForecastPage() {
                       <td className={`pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${(firstForecast?.fixedGain ?? 0) >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                         {formatVNDFull(firstForecast?.fixedGain ?? 0)}
                       </td>
-                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
                     </tr>
                   </tfoot>
                 </table>
