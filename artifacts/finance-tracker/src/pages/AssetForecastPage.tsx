@@ -187,7 +187,7 @@ export default function AssetForecastPage() {
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
   const [assetValueInputs, setAssetValueInputs] = useState(() => readJsonRecord("asset_forecast_asset_values"));
   const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
-  const [investmentReturnInputs] = useState<Record<string, string>>(() => {
+  const [investmentReturnInputs, setInvestmentReturnInputs] = useState<Record<string, string>>(() => {
     const stored = readJsonRecord("asset_forecast_investment_returns");
     return INVEST_TYPES.reduce<Record<string, string>>((acc, type) => {
       acc[type] = stored[type] ?? String(DEFAULT_RATES[type]);
@@ -344,6 +344,14 @@ export default function AssetForecastPage() {
     setAllocationInputs((current) => {
       const next = { ...current, [type]: value };
       LS.set("asset_forecast_allocation_ratios", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const saveInvestmentReturnInput = (type: InvestType, value: string) => {
+    setInvestmentReturnInputs((current) => {
+      const next = { ...current, [type]: value };
+      LS.set("asset_forecast_investment_returns", JSON.stringify(next));
       return next;
     });
   };
@@ -674,11 +682,26 @@ export default function AssetForecastPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-xs">
                 <thead>
-                  <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
-                    <th rowSpan={2} className="py-2 px-4 text-left font-normal align-bottom">Year</th>
+                  <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border/40">
+                    <th rowSpan={3} className="py-2 px-4 text-left font-normal align-bottom">Year</th>
                     {(firstForecast?.investmentDetails ?? []).map((row) => (
                       <th key={row.type} colSpan={2} className="py-2 px-4 text-center font-normal">
                         {row.label}
+                      </th>
+                    ))}
+                  </tr>
+                  <tr className="text-[9px] text-muted-foreground border-b border-border/40">
+                    {(firstForecast?.investmentDetails ?? []).map((row) => (
+                      <th key={`${row.type}-return`} colSpan={2} className="py-2 px-4 text-center font-normal">
+                        <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
+                          <input
+                            value={investmentReturnInputs[row.type] ?? String(DEFAULT_RATES[row.type])}
+                            onChange={(event) => saveInvestmentReturnInput(row.type, event.target.value)}
+                            inputMode="decimal"
+                            className="w-12 bg-transparent text-right text-[11px] tabular-nums outline-none"
+                          />
+                          <span className="text-[10px] text-muted-foreground">%</span>
+                        </div>
                       </th>
                     ))}
                   </tr>
