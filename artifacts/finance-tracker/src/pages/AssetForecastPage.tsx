@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/pages/PageHeader";
 import { Card } from "@/components/ui/card";
@@ -187,7 +187,7 @@ export default function AssetForecastPage() {
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
   const [assetValueInputs, setAssetValueInputs] = useState(() => readJsonRecord("asset_forecast_asset_values"));
   const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
-  const [investmentReturnInputs, setInvestmentReturnInputs] = useState<Record<string, string>>(() => {
+  const [investmentReturnInputs] = useState<Record<string, string>>(() => {
     const stored = readJsonRecord("asset_forecast_investment_returns");
     return INVEST_TYPES.reduce<Record<string, string>>((acc, type) => {
       acc[type] = stored[type] ?? String(DEFAULT_RATES[type]);
@@ -344,14 +344,6 @@ export default function AssetForecastPage() {
     setAllocationInputs((current) => {
       const next = { ...current, [type]: value };
       LS.set("asset_forecast_allocation_ratios", JSON.stringify(next));
-      return next;
-    });
-  };
-
-  const saveInvestmentReturnInput = (type: InvestType, value: string) => {
-    setInvestmentReturnInputs((current) => {
-      const next = { ...current, [type]: value };
-      LS.set("asset_forecast_investment_returns", JSON.stringify(next));
       return next;
     });
   };
@@ -676,46 +668,43 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast 2026</p>
-            <p className="text-[10px] text-muted-foreground">Chỉ giữ 2026 để chỉnh và debug</p>
+            <p className="text-[10px] text-muted-foreground">Mỗi tài sản chỉ hiển thị đầu năm và cuối năm</p>
           </div>
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[920px] text-xs">
+              <table className="w-full min-w-[980px] text-xs">
                 <thead>
                   <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
-                    <th className="py-2 px-4 text-left font-normal">Year</th>
-                    <th className="py-2 px-4 text-left font-normal">Tài sản</th>
-                    <th className="py-2 px-4 text-right font-normal">Start</th>
-                    <th className="py-2 px-4 text-right font-normal">Free cash</th>
-                    <th className="py-2 px-4 text-right font-normal">Before return</th>
-                    <th className="py-2 px-4 text-right font-normal">% / năm</th>
-                    <th className="py-2 px-4 text-right font-normal">Gain</th>
-                    <th className="py-2 px-4 text-right font-normal">End</th>
+                    <th rowSpan={2} className="py-2 px-4 text-left font-normal align-bottom">Year</th>
+                    {(firstForecast?.investmentDetails ?? []).map((row) => (
+                      <th key={row.type} colSpan={2} className="py-2 px-4 text-center font-normal">
+                        {row.label}
+                      </th>
+                    ))}
+                  </tr>
+                  <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
+                    {(firstForecast?.investmentDetails ?? []).map((row) => (
+                      <Fragment key={`${row.type}-headers`}>
+                        <th key={`${row.type}-start`} className="py-2 px-4 text-right font-normal">Đầu năm</th>
+                        <th key={`${row.type}-end`} className="py-2 px-4 text-right font-normal">Cuối năm</th>
+                      </Fragment>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
-                  {(firstForecast?.investmentDetails ?? []).map((row) => (
-                    <tr key={`2026-${row.type}`} className="bg-primary/5">
-                      <td className="py-2.5 px-4 font-medium">2026</td>
-                      <td className="py-2.5 px-4 font-medium">{row.label}</td>
-                      <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.startValue)}</td>
-                      <td className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${row.allocationValue >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.allocationValue)}</td>
-                      <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.valueBeforeReturn)}</td>
-                      <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
-                          <input
-                            value={investmentReturnInputs[row.type] ?? String(DEFAULT_RATES[row.type])}
-                            onChange={(event) => saveInvestmentReturnInput(row.type, event.target.value)}
-                            inputMode="decimal"
-                            className="w-12 bg-transparent text-right text-[11px] tabular-nums outline-none"
-                          />
-                          <span className="text-[10px] text-muted-foreground">%</span>
-                        </div>
-                      </td>
-                      <td className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${row.gain >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.gain)}</td>
-                      <td className="py-2.5 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.endValue)}</td>
-                    </tr>
-                  ))}
+                  <tr className="bg-primary/5">
+                    <td className="py-2.5 px-4 font-medium">2026</td>
+                    {(firstForecast?.investmentDetails ?? []).map((row) => (
+                      <Fragment key={`${row.type}-values`}>
+                        <td key={`${row.type}-start`} className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">
+                          {formatVNDFull(row.valueBeforeReturn)}
+                        </td>
+                        <td key={`${row.type}-end`} className="py-2.5 px-4 text-right tabular-nums font-semibold whitespace-nowrap">
+                          {formatVNDFull(row.endValue)}
+                        </td>
+                      </Fragment>
+                    ))}
+                  </tr>
                 </tbody>
               </table>
             </div>
