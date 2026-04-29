@@ -59,6 +59,30 @@ router.post("/asset-forecast/trades", async (req, res): Promise<void> => {
   res.status(201).json(serializeForecastTrade(row!));
 });
 
+router.put("/asset-forecast/trades/:id", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid trade id." }); return; }
+
+  const parsed = ForecastTradeBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const [row] = await db
+    .update(forecastTradesTable)
+    .set({
+      side: parsed.data.side,
+      year: parsed.data.year,
+      assetType: parsed.data.assetType,
+      symbol: parsed.data.symbol,
+      amount: String(parsed.data.amount),
+      note: parsed.data.note ?? null,
+    })
+    .where(eq(forecastTradesTable.id, id))
+    .returning();
+
+  if (!row) { res.status(404).json({ error: "Forecast trade not found." }); return; }
+  res.json(serializeForecastTrade(row));
+});
+
 router.delete("/asset-forecast/trades/:id", async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {

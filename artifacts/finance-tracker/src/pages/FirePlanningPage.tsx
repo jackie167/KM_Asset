@@ -5,6 +5,7 @@ import PageHeader from "@/pages/PageHeader";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVNDFull } from "@/pages/assets/utils";
 import { CASHFLOW_SOURCE_SHEET, fetchCashflowData, fetchTotalAssetData } from "@/lib/excel-sheets";
+import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -70,12 +71,12 @@ function KpiCard({ label, value, sub, tone = "neutral", loading = false }: {
   label: string; value: string; sub?: string; tone?: Tone; loading?: boolean;
 }) {
   return (
-    <Card className="p-4 space-y-1">
+    <Card className="p-4 space-y-1 min-w-0">
       <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{label}</p>
       {loading
         ? <div className="h-7 w-32 rounded bg-muted animate-pulse" />
-        : <p className={`text-2xl font-bold tabular-nums ${T[tone]}`}>{value}</p>}
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+        : <p className={`text-sm sm:text-base md:text-xl font-bold tabular-nums break-all leading-snug ${T[tone]}`}>{value}</p>}
+      {sub && <p className="text-[10px] sm:text-xs text-muted-foreground break-words">{sub}</p>}
     </Card>
   );
 }
@@ -126,7 +127,9 @@ export default function FirePlanningPage() {
   const [currentAge, setCurrentAge] = useState(() => LS.get("fire_age", 35));
   const [targetAge, setTargetAge] = useState(() => LS.get("fire_target_age", 55));
   const [customSpend, setCustomSpend] = useState(() => LS.get("fire_spend", 0));              // 0 = auto from cashflow
-  const [includeRealEstate, setIncludeRealEstate] = useState(() => LS.get("fire_re", 0) === 1);
+  const [fireAssetMode, setFireAssetMode] = useState<"investment" | "networth">(() =>
+    localStorage.getItem("fire_asset_mode") === "networth" ? "networth" : "investment"
+  );
 
   const save = (k: string, v: number) => { LS.set(k, v); };
 
@@ -135,6 +138,7 @@ export default function FirePlanningPage() {
   const xirrQuery = useQuery({ queryKey: ["portfolio-xirr"], queryFn: fetchXirr });
   const cashflowQuery = useQuery({ queryKey: ["excel-function-cashflow"], queryFn: fetchCashflowData });
   const totalAssetQuery = useQuery({ queryKey: ["excel-total-asset"], queryFn: fetchTotalAssetData });
+  const wealthQuery = useQuery({ queryKey: ["wealth-allocation-holdings"], queryFn: fetchWealthAllocationHoldings });
 
   const isLoading = investQuery.isLoading || cashflowQuery.isLoading;
 
@@ -161,10 +165,14 @@ export default function FirePlanningPage() {
   const fireNumber = wr > 0 ? annualSpend / wr : null;
 
   // Assets counted toward FIRE
-  const fireAssets = useMemo(() => {
-    if (!includeRealEstate) return financialAssets;
-    return totalAssetQuery.data?.netAsset ?? financialAssets;
-  }, [financialAssets, includeRealEstate, totalAssetQuery.data]);
+  const wealthNetAsset = useMemo(() => {
+    const holdings = wealthQuery.data ?? [];
+    const total = holdings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
+    const debt = totalAssetQuery.data?.debt ?? 0;
+    return total - debt;
+  }, [wealthQuery.data, totalAssetQuery.data]);
+
+  const fireAssets = fireAssetMode === "networth" ? wealthNetAsset : financialAssets;
 
   const fireProgress = fireNumber && fireNumber > 0 ? Math.min(fireAssets / fireNumber, 1) : null;
   const freedomRatio = annualSpend > 0 ? (fireAssets * wr) / annualSpend : null;
@@ -236,14 +244,6 @@ export default function FirePlanningPage() {
                 onChange={(v) => { setCurrentAge(v); save("fire_age", v); }} />
               <NumberInput label="Tuổi mục tiêu FIRE" value={targetAge}
                 onChange={(v) => { setTargetAge(v); save("fire_target_age", v); }} />
-              <div className="space-y-1 flex flex-col justify-end">
-                <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Tính cả Bất động sản</label>
-                <button
-                  type="button"
-                  onClick={() => { const n = !includeRealEstate; setIncludeRealEstate(n); save("fire_re", n ? 1 : 0); }}
-                  className={`h-9 rounded border text-xs font-medium transition-colors ${includeRealEstate ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
-                >{includeRealEstate ? "Có (tài sản ròng)" : "Không (tài chính)"}</button>
-              </div>
             </div>
             {autoSpend > 0 && customSpend === 0 && (
               <p className="mt-3 text-[11px] text-muted-foreground">
@@ -271,12 +271,24 @@ export default function FirePlanningPage() {
               sub={`Chi tiêu ${fmt(annualSpend, hide)}/năm ÷ ${withdrawalRate}%`}
               loading={isLoading}
             />
-            <KpiCard
-              label="Tài sản hiện tại"
-              value={fmt(fireAssets, hide)}
-              sub={includeRealEstate ? "Tài sản ròng (có BĐS)" : "Tài sản tài chính"}
-              loading={isLoading}
-            />
+            <Card className="p-4 space-y-1 min-w-0">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Tài sản hiện tại</p>
+              {(isLoading || wealthQuery.isLoading)
+                ? <div className="h-7 w-32 rounded bg-muted animate-pulse" />
+                : <p className="text-sm sm:text-base md:text-xl font-bold tabular-nums break-all leading-snug">{fmt(fireAssets, hide)}</p>}
+              <div className="flex gap-1 pt-1">
+                {(["investment", "networth"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => { setFireAssetMode(mode); localStorage.setItem("fire_asset_mode", mode); }}
+                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${fireAssetMode === mode ? "bg-primary/10 border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {mode === "investment" ? "Investment" : "Net worth"}
+                  </button>
+                ))}
+              </div>
+            </Card>
             <KpiCard
               label="Freedom Ratio"
               value={fmtPct(freedomRatio)}

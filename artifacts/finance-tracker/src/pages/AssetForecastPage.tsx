@@ -129,6 +129,16 @@ async function createForecastTrade(input: ForecastTradeInput): Promise<ForecastT
   return res.json();
 }
 
+async function updateForecastTrade(id: number, input: ForecastTradeInput): Promise<ForecastTrade> {
+  const res = await fetch(`/api/asset-forecast/trades/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("Không cập nhật được forecast trade.");
+  return res.json();
+}
+
 async function deleteForecastTrade(id: number): Promise<void> {
   const res = await fetch(`/api/asset-forecast/trades/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Không xóa được forecast trade.");
@@ -204,6 +214,7 @@ export default function AssetForecastPage() {
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
   const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
   const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
+  const [editingTrade, setEditingTrade] = useState<ForecastTrade | null>(null);
   const [tradeYear, setTradeYear] = useState("2026");
   const [tradeAssetKey, setTradeAssetKey] = useState("");
   const [tradeAmount, setTradeAmount] = useState("");
@@ -461,13 +472,26 @@ export default function AssetForecastPage() {
     });
   };
 
+  const closeTradeDialog = () => {
+    setTradeDialogOpen(false);
+    setEditingTrade(null);
+    setTradeAmount("");
+    setTradeNote("");
+  };
+
   const createTradeMutation = useMutation({
     mutationFn: createForecastTrade,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
-      setTradeDialogOpen(false);
-      setTradeAmount("");
-      setTradeNote("");
+      closeTradeDialog();
+    },
+  });
+
+  const updateTradeMutation = useMutation({
+    mutationFn: ({ id, input }: { id: number; input: ForecastTradeInput }) => updateForecastTrade(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
+      closeTradeDialog();
     },
   });
 
@@ -477,8 +501,21 @@ export default function AssetForecastPage() {
   });
 
   const openTradeDialog = () => {
+    setEditingTrade(null);
     setTradeYear("2026");
     setTradeAssetKey((current) => current || tradeAssetOptions[0]?.key || "");
+    setTradeAmount("");
+    setTradeNote("");
+    setTradeDialogOpen(true);
+  };
+
+  const openEditTradeDialog = (trade: ForecastTrade) => {
+    setEditingTrade(trade);
+    setTradeYear(String(trade.year));
+    const assetKey = `fixed::${fixedTradeKey(trade.assetType, trade.symbol)}`;
+    setTradeAssetKey(assetKey);
+    setTradeAmount(String(trade.amount));
+    setTradeNote(trade.note ?? "");
     setTradeDialogOpen(true);
   };
 
@@ -492,14 +529,20 @@ export default function AssetForecastPage() {
     const year = Number(tradeYear);
     if (!option || !Number.isInteger(year) || amount <= 0 || amount > option.currentValue) return;
 
-    createTradeMutation.mutate({
+    const input: ForecastTradeInput = {
       side: "sell",
       year,
       assetType: option.assetType,
       symbol: option.symbol,
       amount,
       note: tradeNote.trim() || null,
-    });
+    };
+
+    if (editingTrade) {
+      updateTradeMutation.mutate({ id: editingTrade.id, input });
+    } else {
+      createTradeMutation.mutate(input);
+    }
   };
 
   return (
@@ -779,7 +822,15 @@ export default function AssetForecastPage() {
                         <td className="py-2 px-4 whitespace-nowrap">{trade.symbol} <span className="text-muted-foreground">({formatTypeLabel(trade.assetType)})</span></td>
                         <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(trade.amount)}</td>
                         <td className="py-2 px-4 text-muted-foreground">{trade.note || "—"}</td>
-                        <td className="py-2 pl-4 text-right whitespace-nowrap">
+                        <td className="py-2 pl-4 text-right whitespace-nowrap space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-muted-foreground"
+                            onClick={() => openEditTradeDialog(trade)}
+                          >
+                            Sửa
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1055,10 +1106,10 @@ export default function AssetForecastPage() {
 
       </main>
 
-      <Dialog open={tradeDialogOpen} onOpenChange={setTradeDialogOpen}>
+      <Dialog open={tradeDialogOpen} onOpenChange={(open) => { if (!open) closeTradeDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Trade forecast</DialogTitle>
+            <DialogTitle>{editingTrade ? "Sửa trade forecast" : "Trade forecast"}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -1127,17 +1178,21 @@ export default function AssetForecastPage() {
               />
             </label>
 
-            {createTradeMutation.isError && (
+            {(createTradeMutation.isError || updateTradeMutation.isError) && (
               <p className="text-xs text-red-300">Không lưu được forecast trade.</p>
             )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setTradeDialogOpen(false)}>
+            <Button variant="outline" size="sm" onClick={closeTradeDialog}>
               Hủy
             </Button>
-            <Button size="sm" onClick={submitSellTrade} disabled={createTradeMutation.isPending || tradeAmountNum <= 0 || tradeAmountExceedsValue}>
-              Lưu sell
+            <Button
+              size="sm"
+              onClick={submitSellTrade}
+              disabled={createTradeMutation.isPending || updateTradeMutation.isPending || tradeAmountNum <= 0 || tradeAmountExceedsValue}
+            >
+              {editingTrade ? "Cập nhật" : "Lưu sell"}
             </Button>
           </DialogFooter>
         </DialogContent>

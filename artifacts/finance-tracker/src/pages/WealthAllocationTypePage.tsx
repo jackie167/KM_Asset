@@ -6,7 +6,7 @@ import PerformanceChart from "@/pages/assets/PerformanceChart";
 import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
+import { fetchWealthAllocationHoldings, fetchFinancialDetailHoldings } from "@/pages/wealthAllocationData";
 
 type RouteParams = {
   type: string;
@@ -34,8 +34,14 @@ export default function WealthAllocationTypePage() {
     setIsLoading(true);
     setError(null);
     try {
-      const all = await fetchWealthAllocationHoldings();
-      setHoldings(all.filter((h) => h.type.toLowerCase() === normalizedType));
+      let filtered;
+      if (normalizedType === "financial") {
+        filtered = await fetchFinancialDetailHoldings();
+      } else {
+        const all = await fetchWealthAllocationHoldings();
+        filtered = all.filter((h) => h.type.toLowerCase() === normalizedType);
+      }
+      setHoldings(filtered);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load data.");
     } finally {

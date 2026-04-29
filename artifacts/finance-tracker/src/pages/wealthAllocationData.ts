@@ -94,10 +94,24 @@ export function parseCurrentAssetRows(rows: Array<Array<string | number>>): Hold
     .filter((holding): holding is HoldingItem => holding !== null);
 }
 
+async function fetchPortfolioInvestmentHoldings(): Promise<HoldingItem[]> {
+  const res = await fetch("/api/portfolio/summary");
+  if (!res.ok) return [];
+  const summary = await res.json().catch(() => null) as { holdings?: HoldingItem[] } | null;
+  return (summary?.holdings ?? []).filter((holding) => {
+    const type = String(holding.type ?? "").toLowerCase().trim();
+    return !REAL_ESTATE_TYPES.has(type) && (holding.currentValue ?? 0) > 0;
+  });
+}
+
+export async function fetchFinancialDetailHoldings(): Promise<HoldingItem[]> {
+  return fetchPortfolioInvestmentHoldings();
+}
+
 export async function fetchWealthAllocationHoldings() {
-  const [sheetRes, summaryRes] = await Promise.all([
+  const [sheetRes, investmentHoldings] = await Promise.all([
     fetch(`/api/excel/sheet?name=${encodeURIComponent(CURRENT_ASSET_SHEET)}`),
-    fetch("/api/portfolio/summary"),
+    fetchPortfolioInvestmentHoldings(),
   ]);
 
   const sheetData = await readJsonSafe(sheetRes);
@@ -106,13 +120,20 @@ export async function fetchWealthAllocationHoldings() {
 
   const sheetHoldings = parseCurrentAssetRows(rows).filter((holding) => !FINANCIAL_TYPES.has(holding.type));
 
-  if (!summaryRes.ok) return sheetHoldings;
+  if (investmentHoldings.length === 0) return sheetHoldings;
 
-  const summary = await summaryRes.json().catch(() => null) as { holdings?: HoldingItem[] } | null;
-  const investmentHoldings = (summary?.holdings ?? []).filter((holding) => {
-    const type = String(holding.type ?? "").toLowerCase().trim();
-    return !REAL_ESTATE_TYPES.has(type) && (holding.currentValue ?? 0) > 0;
-  });
+  const financialTotal = investmentHoldings.reduce((sum, h) => sum + (h.currentValue ?? 0), 0);
+  const financialHolding: HoldingItem = {
+    id: -1,
+    symbol: "Financial",
+    type: "financial",
+    quantity: 1,
+    currentPrice: financialTotal,
+    currentValue: financialTotal,
+    change: null,
+    changePercent: null,
+    manualPrice: financialTotal,
+  };
 
-  return [...sheetHoldings, ...investmentHoldings];
+  return [...sheetHoldings, financialHolding];
 }
