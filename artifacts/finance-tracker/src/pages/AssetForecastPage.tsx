@@ -269,20 +269,16 @@ export default function AssetForecastPage() {
     });
   }, [assetReturnInputs, currentAssetRows, returnRateInput]);
 
-  const tradeAssetOptions = useMemo(() => [
-    ...INVEST_TYPES.map((type) => ({
-      key: `investment::${type}`,
-      label: TYPE_LABELS[type],
-      assetType: type,
-      symbol: TYPE_LABELS[type],
-    })),
-    ...fixedAssetRows.map((row) => ({
+  // Only fixed (non-investment) assets can be sold via trade dialog
+  const tradeAssetOptions = useMemo(() =>
+    fixedAssetRows.map((row) => ({
       key: `fixed::${row.key}`,
       label: `${row.symbol} (${formatTypeLabel(row.type)})`,
       assetType: row.type,
       symbol: row.symbol,
-    })),
-  ], [fixedAssetRows]);
+      currentValue: row.startValue,
+    }))
+  , [fixedAssetRows]);
 
   const tradeCashByYear = useMemo(() => {
     const result = new Map<number, number>();
@@ -486,11 +482,15 @@ export default function AssetForecastPage() {
     setTradeDialogOpen(true);
   };
 
+  const selectedTradeOption = tradeAssetOptions.find((item) => item.key === tradeAssetKey) ?? null;
+  const tradeAmountNum = parseAmountInput(tradeAmount);
+  const tradeAmountExceedsValue = selectedTradeOption != null && tradeAmountNum > selectedTradeOption.currentValue;
+
   const submitSellTrade = () => {
-    const option = tradeAssetOptions.find((item) => item.key === tradeAssetKey);
-    const amount = parseAmountInput(tradeAmount);
+    const option = selectedTradeOption;
+    const amount = tradeAmountNum;
     const year = Number(tradeYear);
-    if (!option || !Number.isInteger(year) || amount <= 0) return;
+    if (!option || !Number.isInteger(year) || amount <= 0 || amount > option.currentValue) return;
 
     createTradeMutation.mutate({
       side: "sell",
@@ -1094,6 +1094,13 @@ export default function AssetForecastPage() {
               </select>
             </label>
 
+            {selectedTradeOption && (
+              <div className="rounded-md bg-muted/30 px-3 py-2 text-xs space-y-0.5">
+                <p className="text-muted-foreground">Giá trị hiện tại</p>
+                <p className="font-semibold tabular-nums">{formatVNDFull(selectedTradeOption.currentValue)}</p>
+              </div>
+            )}
+
             <label className="space-y-1.5 text-xs block">
               <span className="text-muted-foreground">Giá trị bán</span>
               <Input
@@ -1101,8 +1108,13 @@ export default function AssetForecastPage() {
                 onChange={(event) => setTradeAmount(event.target.value)}
                 inputMode="decimal"
                 placeholder="VD: 1000000000"
-                className="h-9 text-xs tabular-nums"
+                className={`h-9 text-xs tabular-nums ${tradeAmountExceedsValue ? "border-red-400 focus-visible:ring-red-400" : ""}`}
               />
+              {tradeAmountExceedsValue && (
+                <p className="text-[10px] text-red-400 mt-1">
+                  Giá bán ({formatVNDFull(tradeAmountNum)}) vượt giá trị hiện tại ({formatVNDFull(selectedTradeOption?.currentValue)})
+                </p>
+              )}
             </label>
 
             <label className="space-y-1.5 text-xs block">
@@ -1124,7 +1136,7 @@ export default function AssetForecastPage() {
             <Button variant="outline" size="sm" onClick={() => setTradeDialogOpen(false)}>
               Hủy
             </Button>
-            <Button size="sm" onClick={submitSellTrade} disabled={createTradeMutation.isPending || parseAmountInput(tradeAmount) <= 0}>
+            <Button size="sm" onClick={submitSellTrade} disabled={createTradeMutation.isPending || tradeAmountNum <= 0 || tradeAmountExceedsValue}>
               Lưu sell
             </Button>
           </DialogFooter>
