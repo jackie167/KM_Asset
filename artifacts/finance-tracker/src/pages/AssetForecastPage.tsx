@@ -27,6 +27,10 @@ function getInvestmentType(holding: HoldingItem): InvestType | null {
   return SYMBOL_TYPE_MAP[holding.symbol.toLowerCase()] ?? null;
 }
 
+function isUnallocatedFreeCash(holding: HoldingItem) {
+  return holding.symbol.trim().toLowerCase() === "free cash";
+}
+
 type FreeCashRow = {
   year: number;
   income: number;
@@ -208,6 +212,7 @@ export default function AssetForecastPage() {
   const investmentStartRows = useMemo(() => {
     const grouped = new Map<InvestType, number>();
     for (const holding of currentAssetRows) {
+      if (isUnallocatedFreeCash(holding)) continue;
       const type = getInvestmentType(holding);
       if (!type) continue;
       const override = assetValueInputs[assetValueKey(holding)];
@@ -225,6 +230,7 @@ export default function AssetForecastPage() {
 
   const fixedAssetRows = useMemo(() => {
     return currentAssetRows.flatMap((holding) => {
+      if (isUnallocatedFreeCash(holding)) return [];
       if (getInvestmentType(holding)) return [];
       const valueInput = assetValueInputs[assetValueKey(holding)];
       const startValue = valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput);
