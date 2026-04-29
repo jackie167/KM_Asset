@@ -9,18 +9,23 @@ import type { HoldingItem } from "@/pages/assets/types";
 
 const FORECAST_YEARS = [2026, 2027, 2028, 2029, 2030];
 const INITIAL_2026_FREE_CASH = 7_370_845_000;
-const FREE_CASH_ALLOCATION = {
-  cash: 0.1,
-  gold: 0.3,
-  fund: 0.1,
-  crypto: 0.1,
-};
-const STOCK_FREE_CASH_RATIO =
-  1 -
-  FREE_CASH_ALLOCATION.cash -
-  FREE_CASH_ALLOCATION.gold -
-  FREE_CASH_ALLOCATION.fund -
-  FREE_CASH_ALLOCATION.crypto;
+const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto", "bond"] as const;
+type InvestType = typeof INVEST_TYPES[number];
+
+const DEFAULT_RATES: Record<InvestType, number> = { cash: 4, stock: 15, gold: 8, fund: 9, crypto: 15, bond: 7 };
+const TYPE_LABELS: Record<InvestType, string> = { cash: "Cash", stock: "Stock", gold: "Gold", fund: "Fund", crypto: "Crypto", bond: "Bond" };
+const DEFAULT_ALLOCATION_RATIOS: Record<InvestType, number> = { cash: 10, gold: 30, fund: 10, crypto: 10, stock: 40, bond: 0 };
+const SYMBOL_TYPE_MAP: Record<string, InvestType> = { cash: "cash", stock: "stock", gold: "gold", fund: "fund", crypto: "crypto", bond: "bond" };
+
+function isInvestType(value: string): value is InvestType {
+  return INVEST_TYPES.includes(value as InvestType);
+}
+
+function getInvestmentType(holding: HoldingItem): InvestType | null {
+  const type = holding.type.toLowerCase();
+  if (isInvestType(type)) return type;
+  return SYMBOL_TYPE_MAP[holding.symbol.toLowerCase()] ?? null;
+}
 
 type FreeCashRow = {
   year: number;
@@ -173,103 +178,174 @@ function Metric({
 }
 
 export default function AssetForecastPage() {
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(() => LS.get("asset_forecast_year", String(Math.max(2026, currentYear))));
-  const [beginningAssetInput, setBeginningAssetInput] = useState(() => LS.get("asset_forecast_beginning_asset", ""));
   const [returnRateInput, setReturnRateInput] = useState(() => LS.get("asset_forecast_return_rate", "8"));
-  const [freeCashRatioInput, setFreeCashRatioInput] = useState(() => LS.get("asset_forecast_free_cash_ratio", "100"));
-  const [extraCashInput, setExtraCashInput] = useState(() => LS.get("asset_forecast_extra_cash", "0"));
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
   const [assetValueInputs, setAssetValueInputs] = useState(() => readJsonRecord("asset_forecast_asset_values"));
+  const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
+  const [investmentReturnInputs, setInvestmentReturnInputs] = useState<Record<string, string>>(() => {
+    const stored = readJsonRecord("asset_forecast_investment_returns");
+    return INVEST_TYPES.reduce<Record<string, string>>((acc, type) => {
+      acc[type] = stored[type] ?? String(DEFAULT_RATES[type]);
+      return acc;
+    }, {});
+  });
 
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const freeCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
   const loanRowsQuery = useQuery({ queryKey: ["excel-total-asset-rows"], queryFn: fetchTotalAssetRows });
 
-  const currentAssetRows = currentAssetQuery.data ?? [];
-  const freeCashRows = freeCashQuery.data ?? [];
+  const currentAssetRows = useMemo(() => currentAssetQuery.data ?? [], [currentAssetQuery.data]);
+  const freeCashRows = useMemo(() => freeCashQuery.data ?? [], [freeCashQuery.data]);
 
-  // Investment growth forecast (grouped by type)
-  const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto", "bond"] as const;
-  type InvestType = typeof INVEST_TYPES[number];
-  const DEFAULT_RATES: Record<InvestType, number> = { cash: 4, stock: 15, gold: 8, fund: 9, crypto: 15, bond: 7 };
-  const TYPE_LABELS: Record<InvestType, string> = { cash: "Cash", stock: "Stock", gold: "Gold", fund: "Fund", crypto: "Crypto", bond: "Bond" };
-  // Financial rows in the sheet have type="financial" but symbol tells us what they are
-  const SYMBOL_TYPE_MAP: Record<string, InvestType> = { cash: "cash", stock: "stock", gold: "gold", fund: "fund", crypto: "crypto", bond: "bond" };
+  const allocationRatios = useMemo(() => {
+    return INVEST_TYPES.reduce<Record<InvestType, number>>((acc, type) => {
+      const input = allocationInputs[type] ?? String(DEFAULT_ALLOCATION_RATIOS[type]);
+      acc[type] = parseInputNumber(input) / 100;
+      return acc;
+    }, {} as Record<InvestType, number>);
+  }, [allocationInputs]);
 
-  const [growthRates, setGrowthRates] = useState<Record<InvestType, number>>(() => {
-    const stored = localStorage.getItem("wealth_growth_rates");
-    return stored ? { ...DEFAULT_RATES, ...JSON.parse(stored) } : DEFAULT_RATES;
-  });
-
-  const updateRate = (type: InvestType, value: number) => {
-    const next = { ...growthRates, [type]: value };
-    setGrowthRates(next);
-    localStorage.setItem("wealth_growth_rates", JSON.stringify(next));
-  };
-
-  const investRows = useMemo(() => {
-    const grouped = new Map<string, number>();
-    for (const h of currentAssetRows) {
-      // Match by type directly OR by symbol (Financial rows: type="financial", symbol="Cash" etc.)
-      const byType = INVEST_TYPES.includes(h.type.toLowerCase() as InvestType) ? h.type.toLowerCase() as InvestType : null;
-      const bySymbol = SYMBOL_TYPE_MAP[h.symbol.toLowerCase()];
-      const t = byType ?? bySymbol;
-      if (!t) continue;
-      const override = assetValueInputs[assetValueKey(h)];
-      const val = override != null ? parseInputNumber(override) : (h.currentValue ?? 0);
-      grouped.set(t, (grouped.get(t) ?? 0) + val);
+  const investmentStartRows = useMemo(() => {
+    const grouped = new Map<InvestType, number>();
+    for (const holding of currentAssetRows) {
+      const type = getInvestmentType(holding);
+      if (!type) continue;
+      const override = assetValueInputs[assetValueKey(holding)];
+      const value = override != null ? parseInputNumber(override) : holding.currentValue ?? 0;
+      grouped.set(type, (grouped.get(type) ?? 0) + value);
     }
-    return INVEST_TYPES.filter((t) => grouped.has(t)).map((t) => {
-      const value = grouped.get(t) ?? 0;
-      const rate = (growthRates[t] ?? DEFAULT_RATES[t]) / 100;
-      const gain = value * rate;
-      return { type: t, label: TYPE_LABELS[t], value, rate: growthRates[t] ?? DEFAULT_RATES[t], gain, projected: value + gain };
+
+    return INVEST_TYPES.map((type) => ({
+      type,
+      label: TYPE_LABELS[type],
+      startValue: grouped.get(type) ?? 0,
+      returnRate: parseInputNumber(investmentReturnInputs[type] ?? String(DEFAULT_RATES[type])) / 100,
+    })).filter((row) => row.startValue !== 0 || allocationRatios[row.type] !== 0);
+  }, [allocationRatios, assetValueInputs, currentAssetRows, investmentReturnInputs]);
+
+  const fixedAssetRows = useMemo(() => {
+    return currentAssetRows.flatMap((holding) => {
+      if (getInvestmentType(holding)) return [];
+      const valueInput = assetValueInputs[assetValueKey(holding)];
+      const startValue = valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput);
+      const returnInput = assetReturnInputs[assetReturnKey(holding)] ?? returnRateInput;
+      return [{
+        key: assetReturnKey(holding),
+        symbol: holding.symbol,
+        type: holding.type,
+        startValue,
+        returnRate: parseInputNumber(returnInput) / 100,
+        valueInput: valueInput ?? String(Math.round(holding.currentValue ?? 0)),
+        returnInput,
+        holding,
+      }];
     });
-  }, [currentAssetRows, growthRates, assetValueInputs]);
-  const selectedYear = Number(year);
-  const selectedFreeCashRow =
-    freeCashRows.find((row) => row.year === selectedYear) ??
-    freeCashRows.find((row) => row.year === 2026) ??
-    null;
+  }, [assetReturnInputs, assetValueInputs, currentAssetRows, returnRateInput]);
+
+  const allocationRows = useMemo(() => {
+    const rows = new Map<number, number>();
+    rows.set(2026, INITIAL_2026_FREE_CASH);
+    for (const row of freeCashRows) {
+      const allocationYear = row.year + 1;
+      if (FORECAST_YEARS.includes(allocationYear)) rows.set(allocationYear, row.freeCash);
+    }
+    return FORECAST_YEARS.map((year) => ({
+      year,
+      freeCash: rows.get(year) ?? 0,
+      byType: INVEST_TYPES.reduce<Record<InvestType, number>>((acc, type) => {
+        acc[type] = (rows.get(year) ?? 0) * allocationRatios[type];
+        return acc;
+      }, {} as Record<InvestType, number>),
+    }));
+  }, [allocationRatios, freeCashRows]);
+
+  const forecastRows = useMemo(() => {
+    const investmentValues = INVEST_TYPES.reduce<Record<InvestType, number>>((acc, type) => {
+      acc[type] = investmentStartRows.find((row) => row.type === type)?.startValue ?? 0;
+      return acc;
+    }, {} as Record<InvestType, number>);
+    const fixedValues = fixedAssetRows.map((row) => ({ ...row }));
+
+    return FORECAST_YEARS.map((forecastYear) => {
+      const allocation = allocationRows.find((row) => row.year === forecastYear);
+      const investmentDetails = INVEST_TYPES.map((type) => {
+        const startValue = investmentValues[type] ?? 0;
+        const allocationValue = allocation?.byType[type] ?? 0;
+        const valueBeforeReturn = startValue + allocationValue;
+        const returnRate = investmentStartRows.find((row) => row.type === type)?.returnRate ?? 0;
+        const gain = valueBeforeReturn * returnRate;
+        const endValue = valueBeforeReturn + gain;
+        investmentValues[type] = endValue;
+        return { type, label: TYPE_LABELS[type], startValue, allocationValue, valueBeforeReturn, returnRate, gain, endValue };
+      });
+
+      const fixedDetails = fixedValues.map((row) => {
+        const startValue = row.startValue;
+        const gain = startValue * row.returnRate;
+        const endValue = startValue + gain;
+        row.startValue = endValue;
+        return { ...row, startValue, gain, endValue };
+      });
+
+      const investmentStart = investmentDetails.reduce((sum, row) => sum + row.startValue, 0);
+      const investmentAllocation = investmentDetails.reduce((sum, row) => sum + row.allocationValue, 0);
+      const investmentGain = investmentDetails.reduce((sum, row) => sum + row.gain, 0);
+      const investmentEnd = investmentDetails.reduce((sum, row) => sum + row.endValue, 0);
+      const fixedStart = fixedDetails.reduce((sum, row) => sum + row.startValue, 0);
+      const fixedGain = fixedDetails.reduce((sum, row) => sum + row.gain, 0);
+      const fixedEnd = fixedDetails.reduce((sum, row) => sum + row.endValue, 0);
+      const totalStart = investmentStart + fixedStart;
+      const totalEnd = investmentEnd + fixedEnd;
+
+      return {
+        year: forecastYear,
+        investmentDetails,
+        fixedDetails,
+        freeCash: allocation?.freeCash ?? 0,
+        investmentStart,
+        investmentAllocation,
+        investmentBeforeReturn: investmentStart + investmentAllocation,
+        investmentGain,
+        investmentEnd,
+        fixedStart,
+        fixedGain,
+        fixedEnd,
+        totalStart,
+        totalEnd,
+        totalIncrease: totalEnd - totalStart,
+      };
+    });
+  }, [allocationRows, fixedAssetRows, investmentStartRows]);
+
+  const firstForecast = forecastRows[0];
+  const lastForecast = forecastRows[forecastRows.length - 1];
   const currentAssetTotal = currentAssetRows.reduce((sum, holding) => {
     const valueInput = assetValueInputs[assetValueKey(holding)];
-    const currentValue = valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput);
-    return sum + currentValue;
+    return sum + (valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput));
   }, 0);
-  const autoBeginningAsset = currentAssetTotal;
-  const beginningAsset = beginningAssetInput.trim() ? parseInputNumber(beginningAssetInput) : autoBeginningAsset;
-  const returnRate = parseInputNumber(returnRateInput) / 100;
-  const freeCashRatio = parseInputNumber(freeCashRatioInput) / 100;
-  const extraCash = parseInputNumber(extraCashInput);
-  const annualIncome = selectedFreeCashRow?.totalIncome ?? 0;
-  const annualExpense = selectedFreeCashRow?.totalExpense ?? 0;
-  const freeCash = selectedFreeCashRow?.freeCash ?? 0;
-  const investableFreeCash = freeCash * Math.max(freeCashRatio, 0) + extraCash;
-  const currentAssetGrowth = currentAssetRows.reduce((sum, holding) => {
-    const valueInput = assetValueInputs[assetValueKey(holding)];
-    const currentValue = valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput);
-    const rateInput = assetReturnInputs[assetReturnKey(holding)] ?? returnRateInput;
-    return sum + currentValue * (parseInputNumber(rateInput) / 100);
-  }, 0);
-
-  const forecast = useMemo(() => {
-    const investmentGain = beginningAssetInput.trim() ? beginningAsset * returnRate : currentAssetGrowth;
-    const endingAsset = beginningAsset + investmentGain + investableFreeCash;
-    const totalIncrease = endingAsset - beginningAsset;
-    const totalIncreaseRate = beginningAsset > 0 ? totalIncrease / beginningAsset : null;
-
-    return {
-      investmentGain,
-      endingAsset,
-      totalIncrease,
-      totalIncreaseRate,
-    };
-  }, [beginningAsset, beginningAssetInput, currentAssetGrowth, investableFreeCash, returnRate]);
+  const initialInvestmentTotal = investmentStartRows.reduce((sum, row) => sum + row.startValue, 0);
+  const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
+  const allocationRatioTotal = INVEST_TYPES.reduce((sum, type) => sum + allocationRatios[type], 0);
 
   const saveField = (key: string, setter: (value: string) => void) => (value: string) => {
     setter(value);
     LS.set(key, value);
+  };
+
+  const saveAllocationInput = (type: InvestType, value: string) => {
+    setAllocationInputs((current) => {
+      const next = { ...current, [type]: value };
+      LS.set("asset_forecast_allocation_ratios", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const saveInvestmentReturnInput = (type: InvestType, value: string) => {
+    setInvestmentReturnInputs((current) => {
+      const next = { ...current, [type]: value };
+      LS.set("asset_forecast_investment_returns", JSON.stringify(next));
+      return next;
+    });
   };
 
   const saveAssetReturnInput = (holding: HoldingItem, value: string) => {
@@ -298,87 +374,80 @@ export default function AssetForecastPage() {
       />
 
       <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
-        <section className="grid lg:grid-cols-[minmax(0,420px)_1fr] gap-6 items-start">
+        <section className="grid lg:grid-cols-[minmax(0,360px)_1fr] gap-6 items-start">
           <Card className="p-4 md:p-5 space-y-4">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Giả định</p>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-1 gap-4">
-              <Field
-                label="Năm dự báo"
-                value={year}
-                onChange={saveField("asset_forecast_year", setYear)}
-              />
-              <Field
-                label="Tài sản đầu năm"
-                value={beginningAssetInput}
-                onChange={saveField("asset_forecast_beginning_asset", setBeginningAssetInput)}
-                suffix="đ"
-                placeholder={currentAssetQuery.isLoading ? "Đang tải..." : formatVNDFull(autoBeginningAsset)}
-              />
-              <Field
-                label="Tỷ suất mặc định"
-                value={returnRateInput}
-                onChange={saveField("asset_forecast_return_rate", setReturnRateInput)}
-                suffix="%/năm"
-              />
-              <Field
-                label="Tỷ lệ free cash đưa vào đầu tư"
-                value={freeCashRatioInput}
-                onChange={saveField("asset_forecast_free_cash_ratio", setFreeCashRatioInput)}
-                suffix="%"
-              />
-              <Field
-                label="Bổ sung thủ công"
-                value={extraCashInput}
-                onChange={saveField("asset_forecast_extra_cash", setExtraCashInput)}
-                suffix="đ"
-              />
-            </div>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Giả định nền</p>
+            <Field
+              label="Tỷ suất mặc định cho fixed asset"
+              value={returnRateInput}
+              onChange={saveField("asset_forecast_return_rate", setReturnRateInput)}
+              suffix="%/năm"
+            />
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Nếu để trống tài sản đầu năm, hệ thống dùng tổng từ sheet {CURRENT_ASSET_SHEET}. Free cash lấy từ sheet {CASHFLOW_SOURCE_SHEET}.
+              Page này chỉ dùng sheet {CURRENT_ASSET_SHEET} và {CASHFLOW_SOURCE_SHEET}. Free cash cuối 2025 được phân bổ vào đầu 2026 trước khi tính sinh lợi.
             </p>
           </Card>
 
-          <div className="space-y-6">
-            <Card className="p-4 md:p-5 space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Kết quả năm {year || currentYear}</p>
-                {selectedFreeCashRow && (
-                  <span className="text-[10px] text-muted-foreground">Free cash {selectedFreeCashRow.year}</span>
-                )}
+          <Card className="p-4 md:p-5 space-y-4">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng quan 2026-2030</p>
+            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              <Metric label="Investment đầu 2026" value={formatVNDFull(initialInvestmentTotal)} />
+              <Metric label="Fixed asset đầu 2026" value={formatVNDFull(initialFixedTotal)} />
+              <Metric label="Free cash vào 2026" value={formatVNDFull(INITIAL_2026_FREE_CASH)} tone="positive" />
+              <Metric label="Tổng tài sản cuối 2030" value={formatVNDFull(lastForecast?.totalEnd ?? 0)} tone="positive" />
+            </div>
+            {firstForecast && (
+              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 pt-2 border-t border-border/40">
+                <Metric label="Investment cuối 2026" value={formatVNDFull(firstForecast.investmentEnd)} />
+                <Metric label="Fixed asset cuối 2026" value={formatVNDFull(firstForecast.fixedEnd)} />
+                <Metric label="Tổng cuối 2026" value={formatVNDFull(firstForecast.totalEnd)} tone="positive" />
+                <Metric label="Đầu 2027 từ cuối 2026" value={formatVNDFull(firstForecast.totalEnd)} tone="muted" />
               </div>
+            )}
+          </Card>
+        </section>
 
-              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <Metric label="Tài sản đầu năm" value={formatVNDFull(beginningAsset)} />
-                <Metric label="Lãi tăng trưởng" value={formatVNDFull(forecast.investmentGain)} tone={forecast.investmentGain >= 0 ? "positive" : "neutral"} />
-                <Metric label="Free cash bổ sung" value={formatVNDFull(investableFreeCash)} tone="positive" />
-                <Metric label="Tài sản cuối năm" value={formatVNDFull(forecast.endingAsset)} tone="positive" />
-              </div>
-            </Card>
-
-            <Card className="p-4 md:p-5">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3">Chi tiết dòng tính</p>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[620px] text-xs">
-                  <tbody className="divide-y divide-border/40">
-                    {[
-                      ["Tổng income", formatVNDFull(annualIncome)],
-                      ["Tổng chi", formatVNDFull(annualExpense)],
-                      ["Free cash trước phân bổ", formatVNDFull(freeCash)],
-                      ["Free cash đưa vào tài sản", formatVNDFull(investableFreeCash)],
-                      ["Tỷ suất mặc định", formatPercentValue(returnRate * 100)],
-                      ["Tổng tăng tài sản", formatVNDFull(forecast.totalIncrease)],
-                      ["Tỷ lệ tăng tổng", forecast.totalIncreaseRate == null ? "—" : formatPercentValue(forecast.totalIncreaseRate * 100)],
-                    ].map(([label, value]) => (
-                      <tr key={label}>
-                        <td className="py-2 pr-4 text-muted-foreground">{label}</td>
-                        <td className="py-2 text-right font-medium tabular-nums whitespace-nowrap">{value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Forecast summary</p>
+            <p className="text-[10px] text-muted-foreground">Năm sau lấy cuối năm trước làm đầu kỳ</p>
           </div>
+          <Card className="p-4 md:p-5">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1120px] text-xs">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                    <th className="py-2 pr-4 text-left font-medium">Year</th>
+                    <th className="py-2 px-4 text-right font-medium">Investment start</th>
+                    <th className="py-2 px-4 text-right font-medium">Free cash allocated</th>
+                    <th className="py-2 px-4 text-right font-medium">Investment before return</th>
+                    <th className="py-2 px-4 text-right font-medium">Investment gain</th>
+                    <th className="py-2 px-4 text-right font-medium">Investment end</th>
+                    <th className="py-2 px-4 text-right font-medium">Fixed start</th>
+                    <th className="py-2 px-4 text-right font-medium">Fixed gain</th>
+                    <th className="py-2 px-4 text-right font-medium">Fixed end</th>
+                    <th className="py-2 pl-4 text-right font-medium">Total end</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {forecastRows.map((row) => (
+                    <tr key={row.year} className={row.year === 2026 || row.year === 2027 ? "bg-primary/5" : undefined}>
+                      <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
+                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.investmentStart)}</td>
+                      <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.investmentAllocation >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.investmentAllocation)}</td>
+                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.investmentBeforeReturn)}</td>
+                      <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.investmentGain >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.investmentGain)}</td>
+                      <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.investmentEnd)}</td>
+                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.fixedStart)}</td>
+                      <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.fixedGain >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.fixedGain)}</td>
+                      <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.fixedEnd)}</td>
+                      <td className="py-2 pl-4 text-right tabular-nums font-bold whitespace-nowrap">{formatVNDFull(row.totalEnd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         </section>
 
         <section className="space-y-2">
@@ -415,9 +484,8 @@ export default function AssetForecastPage() {
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {freeCashRows.map((row) => {
-                      const isSelected = row.year === selectedYear;
                       return (
-                        <tr key={row.year} className={isSelected ? "bg-primary/5" : undefined}>
+                        <tr key={row.year}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.income)}</td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.otherIncome)}</td>
@@ -444,86 +512,69 @@ export default function AssetForecastPage() {
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
               Phân bổ free cash cho investment
             </p>
-            <p className="text-[10px] text-muted-foreground">Free cash cuối năm N phân bổ cho N+1</p>
+            <p className="text-[10px] text-muted-foreground">Cuối 2025 vào 2026, cuối năm N vào N+1</p>
           </div>
           <Card className="p-4 md:p-5">
-            {freeCashQuery.isLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((row) => (
-                  <div key={row} className="h-8 rounded bg-muted animate-pulse" />
-                ))}
-              </div>
-            ) : freeCashRows.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Chưa có dữ liệu free cash để phân bổ.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-xs">
-                  <thead>
-                    <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
-                      <th className="py-2 pr-4 text-left font-medium">Free cash</th>
-                      <th className="py-2 px-4 text-right font-medium">Cash</th>
-                      <th className="py-2 px-4 text-right font-medium">Gold</th>
-                      <th className="py-2 px-4 text-right font-medium">Fund</th>
-                      <th className="py-2 px-4 text-right font-medium">Crypto</th>
-                      <th className="py-2 pl-4 text-right font-medium">Stock</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/40">
-                    <tr className="bg-muted/20">
-                      <td className="py-2 pr-4 font-medium whitespace-nowrap">Ratio</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatPercentValue(FREE_CASH_ALLOCATION.cash * 100)}</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatPercentValue(FREE_CASH_ALLOCATION.gold * 100)}</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatPercentValue(FREE_CASH_ALLOCATION.fund * 100)}</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatPercentValue(FREE_CASH_ALLOCATION.crypto * 100)}</td>
-                      <td className="py-2 pl-4 text-right tabular-nums whitespace-nowrap">{formatPercentValue(STOCK_FREE_CASH_RATIO * 100)}</td>
-                    </tr>
-                    <tr className={selectedYear === 2026 ? "bg-primary/5" : undefined}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-xs">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                    <th className="py-2 pr-4 text-left font-medium">Free cash</th>
+                    {INVEST_TYPES.map((type) => (
+                      <th key={type} className="py-2 px-4 text-right font-medium">{TYPE_LABELS[type]}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  <tr className="bg-muted/20">
+                    <td className="py-2 pr-4 font-medium whitespace-nowrap">
+                      Ratio
+                      <span className={`ml-2 tabular-nums ${Math.abs(allocationRatioTotal - 1) < 0.0001 ? "text-muted-foreground" : "text-amber-300"}`}>
+                        {formatPercentValue(allocationRatioTotal * 100)}
+                      </span>
+                    </td>
+                    {INVEST_TYPES.map((type) => (
+                      <td key={type} className="py-2 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
+                          <input
+                            value={allocationInputs[type] ?? String(DEFAULT_ALLOCATION_RATIOS[type])}
+                            onChange={(event) => saveAllocationInput(type, event.target.value)}
+                            inputMode="decimal"
+                            className="w-12 bg-transparent text-right text-[11px] tabular-nums outline-none"
+                          />
+                          <span className="text-[10px] text-muted-foreground">%</span>
+                        </div>
+                      </td>
+                    ))}
+                  </tr>
+                  {allocationRows.map((row) => (
+                    <tr key={`allocation-${row.year}`} className={row.year === 2026 || row.year === 2027 ? "bg-primary/5" : undefined}>
                       <td className="py-2 pr-4 whitespace-nowrap">
-                        <span className="font-medium">2026</span>
-                        <span className="ml-3 tabular-nums text-emerald-400">
-                          {formatVNDFull(INITIAL_2026_FREE_CASH)}
+                        <span className="font-medium">{row.year}</span>
+                        <span className={`ml-3 tabular-nums ${row.freeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
+                          {formatVNDFull(row.freeCash)}
                         </span>
                       </td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(INITIAL_2026_FREE_CASH * FREE_CASH_ALLOCATION.cash)}</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(INITIAL_2026_FREE_CASH * FREE_CASH_ALLOCATION.gold)}</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(INITIAL_2026_FREE_CASH * FREE_CASH_ALLOCATION.fund)}</td>
-                      <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(INITIAL_2026_FREE_CASH * FREE_CASH_ALLOCATION.crypto)}</td>
-                      <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(INITIAL_2026_FREE_CASH * STOCK_FREE_CASH_RATIO)}</td>
+                      {INVEST_TYPES.map((type) => (
+                        <td key={type} className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
+                          {formatVNDFull(row.byType[type])}
+                        </td>
+                      ))}
                     </tr>
-                    {freeCashRows.map((row) => {
-                      const allocationYear = row.year + 1;
-                      const allocatableFreeCash = row.freeCash;
-                      const isSelected = allocationYear === selectedYear;
-                      return (
-                        <tr key={`allocation-${allocationYear}`} className={isSelected ? "bg-primary/5" : undefined}>
-                          <td className="py-2 pr-4 whitespace-nowrap">
-                            <span className="font-medium">{allocationYear}</span>
-                            <span className={`ml-3 tabular-nums ${row.freeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
-                              {formatVNDFull(row.freeCash)}
-                            </span>
-                          </td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(allocatableFreeCash * FREE_CASH_ALLOCATION.cash)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(allocatableFreeCash * FREE_CASH_ALLOCATION.gold)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(allocatableFreeCash * FREE_CASH_ALLOCATION.fund)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(allocatableFreeCash * FREE_CASH_ALLOCATION.crypto)}</td>
-                          <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(allocatableFreeCash * STOCK_FREE_CASH_RATIO)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Card>
         </section>
 
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Data chuẩn bị từ sheet {CURRENT_ASSET_SHEET}
+              Fixed asset từ sheet {CURRENT_ASSET_SHEET}
             </p>
             <p className="text-[10px] text-muted-foreground">
-              {currentAssetRows.length} dòng · tổng {formatVNDFull(currentAssetTotal)}
+              {fixedAssetRows.length} dòng · tổng {formatVNDFull(initialFixedTotal)}
             </p>
           </div>
           <Card className="p-4 md:p-5">
@@ -533,7 +584,7 @@ export default function AssetForecastPage() {
                   <div key={row} className="h-8 rounded bg-muted animate-pulse" />
                 ))}
               </div>
-            ) : currentAssetRows.length === 0 ? (
+            ) : fixedAssetRows.length === 0 ? (
               <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu từ sheet {CURRENT_ASSET_SHEET}.</p>
             ) : (
               <div className="overflow-x-auto">
@@ -550,28 +601,21 @@ export default function AssetForecastPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
-                    {currentAssetRows.filter((h) => {
-                      const t = h.type.toLowerCase();
-                      const sym = h.symbol.toLowerCase();
-                      return t !== "financial" && !SYMBOL_TYPE_MAP[sym];
-                    }).map((holding) => {
-                      const valueInput = assetValueInputs[assetValueKey(holding)] ?? String(Math.round(holding.currentValue ?? 0));
-                      const currentValue = parseInputNumber(valueInput);
-                      const weight = currentAssetTotal > 0 ? currentValue / currentAssetTotal : null;
-                      const returnInput = assetReturnInputs[assetReturnKey(holding)] ?? returnRateInput;
-                      const assetReturnRate = parseInputNumber(returnInput) / 100;
-                      const growth = currentValue * assetReturnRate;
-                      const endingValue = currentValue + growth;
+                    {fixedAssetRows.map((row) => {
+                      const weight = currentAssetTotal > 0 ? row.startValue / currentAssetTotal : null;
+                      const firstYearDetail = firstForecast?.fixedDetails.find((detail) => detail.key === row.key);
+                      const growth = firstYearDetail?.gain ?? row.startValue * row.returnRate;
+                      const endingValue = firstYearDetail?.endValue ?? row.startValue + growth;
 
                       return (
-                        <tr key={`${holding.type}-${holding.symbol}`}>
-                          <td className="py-2 pr-4 font-medium whitespace-nowrap">{holding.symbol}</td>
-                          <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{formatTypeLabel(holding.type)}</td>
+                        <tr key={row.key}>
+                          <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.symbol}</td>
+                          <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{formatTypeLabel(row.type)}</td>
                           <td className="py-2 px-4 text-right whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
                               <input
-                                value={valueInput}
-                                onChange={(event) => saveAssetValueInput(holding, event.target.value)}
+                                value={row.valueInput}
+                                onChange={(event) => saveAssetValueInput(row.holding, event.target.value)}
                                 inputMode="numeric"
                                 className="w-32 bg-transparent text-right text-[11px] tabular-nums outline-none"
                               />
@@ -584,8 +628,8 @@ export default function AssetForecastPage() {
                           <td className="py-2 px-4 text-right whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
                               <input
-                                value={returnInput}
-                                onChange={(event) => saveAssetReturnInput(holding, event.target.value)}
+                                value={row.returnInput}
+                                onChange={(event) => saveAssetReturnInput(row.holding, event.target.value)}
                                 inputMode="decimal"
                                 className="w-14 bg-transparent text-right text-[11px] tabular-nums outline-none"
                               />
@@ -604,13 +648,15 @@ export default function AssetForecastPage() {
                     <tr className="border-t border-border">
                       <td className="pt-3 pr-4 text-[10px] uppercase tracking-wider text-muted-foreground">Total</td>
                       <td />
-                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(currentAssetTotal)}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums text-muted-foreground">100.00%</td>
-                      <td />
-                      <td className={`pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${forecast.investmentGain >= 0 ? "text-emerald-400" : "text-red-300"}`}>
-                        {formatVNDFull(currentAssetGrowth)}
+                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(initialFixedTotal)}</td>
+                      <td className="pt-3 px-4 text-right tabular-nums text-muted-foreground">
+                        {currentAssetTotal > 0 ? formatPercentValue((initialFixedTotal / currentAssetTotal) * 100) : "—"}
                       </td>
-                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(currentAssetTotal + currentAssetGrowth)}</td>
+                      <td />
+                      <td className={`pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${(firstForecast?.fixedGain ?? 0) >= 0 ? "text-emerald-400" : "text-red-300"}`}>
+                        {formatVNDFull(firstForecast?.fixedGain ?? 0)}
+                      </td>
+                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -618,59 +664,59 @@ export default function AssetForecastPage() {
             )}
           </Card>
         </section>
-        {/* ── Dự báo Gia tăng Investment ───────────────────────────────── */}
-        {investRows.length > 0 && (
-          <section className="space-y-2">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Dự báo Gia tăng Investment</p>
-            <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-xs">
-                  <thead>
-                    <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
-                      <th className="py-2 px-4 text-left font-normal">Tài sản</th>
-                      <th className="py-2 px-4 text-right font-normal">Giá trị hiện tại</th>
-                      <th className="py-2 px-4 text-right font-normal">% / năm</th>
-                      <th className="py-2 px-4 text-right font-normal">Kỳ vọng tăng</th>
-                      <th className="py-2 px-4 text-right font-normal">Dự báo cuối năm</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/40">
-                    {investRows.map((row) => (
-                      <tr key={row.type} className="hover:bg-muted/20">
-                        <td className="py-2.5 px-4 font-medium">{row.label}</td>
-                        <td className="py-2.5 px-4 text-right tabular-nums">{formatVNDFull(row.value)}</td>
-                        <td className="py-2.5 px-4 text-right">
+
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast</p>
+            <p className="text-[10px] text-muted-foreground">Từ sheet {CURRENT_ASSET_SHEET}, chưa dùng live Investment</p>
+          </div>
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[920px] text-xs">
+                <thead>
+                  <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
+                    <th className="py-2 px-4 text-left font-normal">Year</th>
+                    <th className="py-2 px-4 text-left font-normal">Tài sản</th>
+                    <th className="py-2 px-4 text-right font-normal">Start</th>
+                    <th className="py-2 px-4 text-right font-normal">Free cash</th>
+                    <th className="py-2 px-4 text-right font-normal">Before return</th>
+                    <th className="py-2 px-4 text-right font-normal">% / năm</th>
+                    <th className="py-2 px-4 text-right font-normal">Gain</th>
+                    <th className="py-2 px-4 text-right font-normal">End</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {forecastRows.flatMap((yearRow) => yearRow.investmentDetails.map((row) => (
+                    <tr key={`${yearRow.year}-${row.type}`} className={yearRow.year === 2026 || yearRow.year === 2027 ? "bg-primary/5" : undefined}>
+                      <td className="py-2.5 px-4 font-medium">{yearRow.year}</td>
+                      <td className="py-2.5 px-4 font-medium">{row.label}</td>
+                      <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.startValue)}</td>
+                      <td className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${row.allocationValue >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.allocationValue)}</td>
+                      <td className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.valueBeforeReturn)}</td>
+                      <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                        {yearRow.year === 2026 ? (
                           <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
                             <input
-                              type="number" min={0} max={100} step={0.5}
-                              value={row.rate}
-                              onChange={(e) => updateRate(row.type as InvestType, Number(e.target.value))}
+                              value={investmentReturnInputs[row.type] ?? String(DEFAULT_RATES[row.type])}
+                              onChange={(event) => saveInvestmentReturnInput(row.type, event.target.value)}
+                              inputMode="decimal"
                               className="w-12 bg-transparent text-right text-[11px] tabular-nums outline-none"
                             />
                             <span className="text-[10px] text-muted-foreground">%</span>
                           </div>
-                        </td>
-                        <td className="py-2.5 px-4 text-right tabular-nums font-medium text-emerald-400">
-                          +{formatVNDFull(row.gain)}
-                        </td>
-                        <td className="py-2.5 px-4 text-right tabular-nums font-semibold">{formatVNDFull(row.projected)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t border-border">
-                      <td className="pt-3 px-4 font-bold">Tổng</td>
-                      <td className="pt-3 px-4 text-right tabular-nums font-bold">{formatVNDFull(investRows.reduce((s, r) => s + r.value, 0))}</td>
-                      <td />
-                      <td className="pt-3 px-4 text-right tabular-nums font-bold text-emerald-400">+{formatVNDFull(investRows.reduce((s, r) => s + r.gain, 0))}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums font-bold">{formatVNDFull(investRows.reduce((s, r) => s + r.projected, 0))}</td>
+                        ) : (
+                          <span className="tabular-nums text-muted-foreground">{formatPercentValue(row.returnRate * 100)}</span>
+                        )}
+                      </td>
+                      <td className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${row.gain >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.gain)}</td>
+                      <td className="py-2.5 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.endValue)}</td>
                     </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </Card>
-          </section>
-        )}
+                  )))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </section>
 
         {/* ── Theo dõi khoản vay ───────────────────────────────────────── */}
         {(() => {
