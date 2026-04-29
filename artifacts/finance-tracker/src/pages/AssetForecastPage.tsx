@@ -595,11 +595,14 @@ export default function AssetForecastPage() {
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Asset</th>
-                      <th className="py-2 px-4 text-left font-medium">Type</th>
-                      <th className="py-2 px-4 text-right font-medium">Assumed return</th>
+                      <th className="w-20 py-2 px-2 text-left font-medium">Type</th>
+                      <th className="w-24 py-2 px-2 text-right font-medium">Assumed return</th>
                       <th className="py-2 px-4 text-right font-medium">Đầu 2026</th>
                       <th className="py-2 px-4 text-right font-medium">2026</th>
-                      <th className="py-2 pl-4 text-right font-medium">2027</th>
+                      <th className="py-2 px-4 text-right font-medium">2027</th>
+                      <th className="py-2 px-4 text-right font-medium">2028</th>
+                      <th className="py-2 px-4 text-right font-medium">2029</th>
+                      <th className="py-2 pl-4 text-right font-medium">2030</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
@@ -607,18 +610,21 @@ export default function AssetForecastPage() {
                       const firstYearDetail = firstForecast?.fixedDetails.find((detail) => detail.key === row.key);
                       const end2026 = firstYearDetail?.endValue ?? row.startValue * (1 + row.returnRate);
                       const end2027 = end2026 * (1 + row.returnRate);
+                      const end2028 = end2027 * (1 + row.returnRate);
+                      const end2029 = end2028 * (1 + row.returnRate);
+                      const end2030 = end2029 * (1 + row.returnRate);
 
                       return (
                         <tr key={row.key}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.symbol}</td>
-                          <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{formatTypeLabel(row.type)}</td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
+                          <td className="w-20 py-2 px-2 text-muted-foreground whitespace-normal leading-tight">{formatTypeLabel(row.type)}</td>
+                          <td className="w-24 py-2 px-2 text-right whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
                               <input
                                 value={row.returnInput}
                                 onChange={(event) => saveAssetReturnInput(row.holding, event.target.value)}
                                 inputMode="decimal"
-                                className="w-14 bg-transparent text-right text-[11px] tabular-nums outline-none"
+                                className="w-10 bg-transparent text-right text-[11px] tabular-nums outline-none"
                               />
                               <span className="text-[10px] text-muted-foreground">%</span>
                             </div>
@@ -635,7 +641,10 @@ export default function AssetForecastPage() {
                             </div>
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2026)}</td>
-                          <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2027)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2027)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2028)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2029)}</td>
+                          <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2030)}</td>
                         </tr>
                       );
                     })}
@@ -647,7 +656,10 @@ export default function AssetForecastPage() {
                       <td />
                       <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(initialFixedTotal)}</td>
                       <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
-                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[2]?.fixedEnd ?? forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[3]?.fixedEnd ?? forecastRows[2]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[4]?.fixedEnd ?? forecastRows[3]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
                     </tr>
                   </tfoot>
                 </table>
