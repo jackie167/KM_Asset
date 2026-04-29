@@ -121,12 +121,6 @@ async function fetchFreeCashRows(): Promise<FreeCashRow[]> {
   }
 }
 
-function parseInputNumber(value: string): number {
-  const normalized = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
-  const parsed = Number.parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function parsePercentInput(value: string): number {
   const cleaned = value.trim().replace(/[^\d,.-]/g, "");
   const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
@@ -160,7 +154,7 @@ export default function AssetForecastPage() {
   const allocationRatios = useMemo(() => {
     return INVEST_TYPES.reduce<Record<InvestType, number>>((acc, type) => {
       const input = allocationInputs[type] ?? String(DEFAULT_ALLOCATION_RATIOS[type]);
-      acc[type] = parseInputNumber(input) / 100;
+      acc[type] = parsePercentInput(input) / 100;
       return acc;
     }, {} as Record<InvestType, number>);
   }, [allocationInputs]);
