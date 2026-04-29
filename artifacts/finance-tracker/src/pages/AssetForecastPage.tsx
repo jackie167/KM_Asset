@@ -227,6 +227,7 @@ export default function AssetForecastPage() {
 
     return FORECAST_YEARS.map((forecastYear) => {
       const allocation = allocationRows.find((row) => row.year === forecastYear);
+      const endYearFreeCash = freeCashRows.find((row) => row.year === forecastYear)?.freeCash ?? 0;
       const investmentDetails = INVEST_TYPES.map((type) => {
         const startValue = investmentValues[type] ?? 0;
         const allocationValue = allocation?.byType[type] ?? 0;
@@ -254,7 +255,7 @@ export default function AssetForecastPage() {
       const fixedGain = fixedDetails.reduce((sum, row) => sum + row.gain, 0);
       const fixedEnd = fixedDetails.reduce((sum, row) => sum + row.endValue, 0);
       const totalStart = investmentStart + fixedStart;
-      const totalEnd = investmentEnd + fixedEnd;
+      const totalEnd = investmentEnd + fixedEnd + endYearFreeCash;
 
       return {
         year: forecastYear,
@@ -269,12 +270,13 @@ export default function AssetForecastPage() {
         fixedStart,
         fixedGain,
         fixedEnd,
+        endYearFreeCash,
         totalStart,
         totalEnd,
         totalIncrease: totalEnd - totalStart,
       };
     });
-  }, [allocationRows, fixedAssetRows, investmentStartRows]);
+  }, [allocationRows, fixedAssetRows, freeCashRows, investmentStartRows]);
 
   const firstForecast = forecastRows[0];
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
@@ -297,6 +299,13 @@ export default function AssetForecastPage() {
           ?.endValue ?? 0
       )),
     })),
+    {
+      key: "end-year-free-cash",
+      label: "Free cash cuối năm",
+      values: FORECAST_YEARS.map((forecastYear) => (
+        forecastRows.find((row) => row.year === forecastYear)?.endYearFreeCash ?? 0
+      )),
+    },
   ];
   const totalAssetValues = FORECAST_YEARS.map((_, index) => (
     totalAssetForecastRows.reduce((sum, row) => sum + row.values[index], 0)
