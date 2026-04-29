@@ -8,6 +8,7 @@ import excelRouter from "./excel.js";
 import transactionsRouter from "./transactions.js";
 import expensesRouter from "./expenses.js";
 import wealthRouter from "./wealth.js";
+import forecastRouter from "./forecast.js";
 
 const router: IRouter = Router();
 
@@ -18,6 +19,7 @@ router.use(holdingsRouter);
 router.use(transactionsRouter);
 router.use(expensesRouter);
 router.use(wealthRouter);
+router.use(forecastRouter);
 router.use(pricesRouter);
 router.use(snapshotsRouter);
 

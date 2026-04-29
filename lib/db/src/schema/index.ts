@@ -7,3 +7,4 @@ export * from "./transactions";
 export * from "./portfolio-cash-flows";
 export * from "./expenses";
 export * from "./wealth-snapshots";
+export * from "./forecast-trades";

@@ -80,4 +80,23 @@ export async function ensureDatabaseSchema() {
     CREATE INDEX IF NOT EXISTS price_history_asset_date_idx
       ON price_history (asset_code, date DESC)
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forecast_trades (
+      id serial PRIMARY KEY,
+      side text NOT NULL,
+      year integer NOT NULL,
+      asset_type text NOT NULL,
+      symbol text NOT NULL,
+      amount numeric(18, 2) NOT NULL,
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS forecast_trades_year_idx
+      ON forecast_trades (year)
+  `);
 }
