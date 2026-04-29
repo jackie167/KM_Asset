@@ -1,8 +1,9 @@
 import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import PageHeader from "@/pages/PageHeader";
 import { Card } from "@/components/ui/card";
-import { formatTypeLabel, formatVNDFull } from "@/pages/assets/utils";
+import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
 import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum, fetchTotalAssetRows, type TotalAssetRow } from "@/lib/excel-sheets";
 import { CURRENT_ASSET_SHEET, parseCurrentAssetRows } from "@/pages/wealthAllocationData";
 import type { HoldingItem } from "@/pages/assets/types";
@@ -130,56 +131,8 @@ function formatPercentValue(value: number) {
   return `${value.toFixed(2)}%`;
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  suffix,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  suffix?: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 focus-within:ring-1 focus-within:ring-primary">
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          inputMode="decimal"
-          placeholder={placeholder}
-          className="min-w-0 flex-1 bg-transparent text-sm tabular-nums outline-none"
-        />
-        {suffix && <span className="text-xs text-muted-foreground shrink-0">{suffix}</span>}
-      </div>
-    </label>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "positive" | "muted";
-}) {
-  const color = tone === "positive" ? "text-emerald-400" : tone === "muted" ? "text-muted-foreground" : "text-foreground";
-  return (
-    <div className="border-b border-border/30 pb-3 last:border-0 last:pb-0">
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-sm font-semibold tabular-nums ${color}`}>{value}</p>
-    </div>
-  );
-}
-
 export default function AssetForecastPage() {
-  const [returnRateInput, setReturnRateInput] = useState(() => LS.get("asset_forecast_return_rate", "8"));
+  const returnRateInput = LS.get("asset_forecast_return_rate", "8");
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
   const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
   const [investmentReturnInputs, setInvestmentReturnInputs] = useState<Record<string, string>>(() => {
@@ -317,8 +270,6 @@ export default function AssetForecastPage() {
   }, [allocationRows, fixedAssetRows, investmentStartRows]);
 
   const firstForecast = forecastRows[0];
-  const lastForecast = forecastRows[forecastRows.length - 1];
-  const initialInvestmentTotal = investmentStartRows.reduce((sum, row) => sum + row.startValue, 0);
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
   const allocationRatioTotal = INVEST_TYPES.reduce((sum, type) => sum + allocationRatios[type], 0);
   const totalAssetForecastRows = [
@@ -343,11 +294,10 @@ export default function AssetForecastPage() {
   const totalAssetValues = FORECAST_YEARS.map((_, index) => (
     totalAssetForecastRows.reduce((sum, row) => sum + row.values[index], 0)
   ));
-
-  const saveField = (key: string, setter: (value: string) => void) => (value: string) => {
-    setter(value);
-    LS.set(key, value);
-  };
+  const totalAssetChartData = FORECAST_YEARS.map((forecastYear, index) => ({
+    year: String(forecastYear),
+    value: totalAssetValues[index],
+  }));
 
   const saveAllocationInput = (type: InvestType, value: string) => {
     setAllocationInputs((current) => {
@@ -382,36 +332,54 @@ export default function AssetForecastPage() {
       />
 
       <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
-        <section className="grid lg:grid-cols-[minmax(0,360px)_1fr] gap-6 items-start">
-          <Card className="p-4 md:p-5 space-y-4">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Giả định nền</p>
-            <Field
-              label="Tỷ suất mặc định cho fixed asset"
-              value={returnRateInput}
-              onChange={saveField("asset_forecast_return_rate", setReturnRateInput)}
-              suffix="%/năm"
-            />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Page này chỉ dùng sheet {CURRENT_ASSET_SHEET} và {CASHFLOW_SOURCE_SHEET}. Free cash cuối 2025 được phân bổ vào đầu 2026 trước khi tính sinh lợi.
-            </p>
-          </Card>
-
-          <Card className="p-4 md:p-5 space-y-4">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng quan 2026-2030</p>
-            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <Metric label="Investment đầu 2026" value={formatVNDFull(initialInvestmentTotal)} />
-              <Metric label="Fixed asset đầu 2026" value={formatVNDFull(initialFixedTotal)} />
-              <Metric label="Free cash vào 2026" value={formatVNDFull(INITIAL_2026_FREE_CASH)} tone="positive" />
-              <Metric label="Tổng tài sản cuối 2030" value={formatVNDFull(lastForecast?.totalEnd ?? 0)} tone="positive" />
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Biểu đồ forecast tài sản</p>
+            <p className="text-[10px] text-muted-foreground">2026-2030</p>
+          </div>
+          <Card className="p-4 md:p-5">
+            <div className="h-[280px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={totalAssetChartData} margin={{ top: 12, right: 12, left: 10, bottom: 0 }}>
+                  <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="year"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    tickFormatter={(value: number) => formatVND(value)}
+                    width={72}
+                  />
+                  <Tooltip
+                    formatter={(value: number) => [formatVNDFull(value), "Tổng tài sản"]}
+                    labelFormatter={(label) => `Năm ${label}`}
+                    contentStyle={{
+                      background: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: 8,
+                      color: "hsl(var(--foreground))",
+                      fontSize: 12,
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="hsl(160, 84%, 45%)"
+                    fill="hsl(160, 84%, 45%)"
+                    fillOpacity={0.16}
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: "hsl(160, 84%, 45%)" }}
+                    activeDot={{ r: 4 }}
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
-            {firstForecast && (
-              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 pt-2 border-t border-border/40">
-                <Metric label="Investment cuối 2026" value={formatVNDFull(firstForecast.investmentEnd)} />
-                <Metric label="Fixed asset cuối 2026" value={formatVNDFull(firstForecast.fixedEnd)} />
-                <Metric label="Tổng cuối 2026" value={formatVNDFull(firstForecast.totalEnd)} tone="positive" />
-                <Metric label="Đầu 2027 từ cuối 2026" value={formatVNDFull(firstForecast.totalEnd)} tone="muted" />
-              </div>
-            )}
           </Card>
         </section>
 
