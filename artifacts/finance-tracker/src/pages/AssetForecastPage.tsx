@@ -62,10 +62,6 @@ function assetReturnKey(holding: HoldingItem) {
   return `${holding.type.trim().toLowerCase()}::${holding.symbol.trim().toUpperCase()}`;
 }
 
-function assetValueKey(holding: HoldingItem) {
-  return assetReturnKey(holding);
-}
-
 async function fetchCurrentAssetData(): Promise<HoldingItem[]> {
   try {
     const res = await fetch(`/api/excel/sheet?name=${encodeURIComponent(CURRENT_ASSET_SHEET)}`);
@@ -185,7 +181,6 @@ function Metric({
 export default function AssetForecastPage() {
   const [returnRateInput, setReturnRateInput] = useState(() => LS.get("asset_forecast_return_rate", "8"));
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
-  const [assetValueInputs, setAssetValueInputs] = useState(() => readJsonRecord("asset_forecast_asset_values"));
   const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
   const [investmentReturnInputs, setInvestmentReturnInputs] = useState<Record<string, string>>(() => {
     const stored = readJsonRecord("asset_forecast_investment_returns");
@@ -216,8 +211,7 @@ export default function AssetForecastPage() {
       if (isUnallocatedFreeCash(holding)) continue;
       const type = getInvestmentType(holding);
       if (!type) continue;
-      const override = assetValueInputs[assetValueKey(holding)];
-      const value = override != null ? parseInputNumber(override) : holding.currentValue ?? 0;
+      const value = holding.currentValue ?? 0;
       grouped.set(type, (grouped.get(type) ?? 0) + value);
     }
 
@@ -227,14 +221,13 @@ export default function AssetForecastPage() {
       startValue: grouped.get(type) ?? 0,
       returnRate: parseInputNumber(investmentReturnInputs[type] ?? String(DEFAULT_RATES[type])) / 100,
     })).filter((row) => row.startValue !== 0 || allocationRatios[row.type] !== 0);
-  }, [allocationRatios, assetValueInputs, currentAssetRows, investmentReturnInputs]);
+  }, [allocationRatios, currentAssetRows, investmentReturnInputs]);
 
   const fixedAssetRows = useMemo(() => {
     return currentAssetRows.flatMap((holding) => {
       if (isUnallocatedFreeCash(holding)) return [];
       if (getInvestmentType(holding)) return [];
-      const valueInput = assetValueInputs[assetValueKey(holding)];
-      const startValue = valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput);
+      const startValue = holding.currentValue ?? 0;
       const returnInput = assetReturnInputs[assetReturnKey(holding)] ?? returnRateInput;
       return [{
         key: assetReturnKey(holding),
@@ -242,12 +235,11 @@ export default function AssetForecastPage() {
         type: holding.type,
         startValue,
         returnRate: parseInputNumber(returnInput) / 100,
-        valueInput: valueInput ?? String(Math.round(holding.currentValue ?? 0)),
         returnInput,
         holding,
       }];
     });
-  }, [assetReturnInputs, assetValueInputs, currentAssetRows, returnRateInput]);
+  }, [assetReturnInputs, currentAssetRows, returnRateInput]);
 
   const allocationRows = useMemo(() => {
     const rows = new Map<number, number>();
@@ -329,6 +321,28 @@ export default function AssetForecastPage() {
   const initialInvestmentTotal = investmentStartRows.reduce((sum, row) => sum + row.startValue, 0);
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
   const allocationRatioTotal = INVEST_TYPES.reduce((sum, type) => sum + allocationRatios[type], 0);
+  const totalAssetForecastRows = [
+    {
+      key: "fixed",
+      label: "Fixed asset",
+      values: FORECAST_YEARS.map((forecastYear) => (
+        forecastRows.find((row) => row.year === forecastYear)?.fixedEnd ?? 0
+      )),
+    },
+    ...INVEST_TYPES.map((type) => ({
+      key: type,
+      label: TYPE_LABELS[type],
+      values: FORECAST_YEARS.map((forecastYear) => (
+        forecastRows
+          .find((row) => row.year === forecastYear)
+          ?.investmentDetails.find((detail) => detail.type === type)
+          ?.endValue ?? 0
+      )),
+    })),
+  ];
+  const totalAssetValues = FORECAST_YEARS.map((_, index) => (
+    totalAssetForecastRows.reduce((sum, row) => sum + row.values[index], 0)
+  ));
 
   const saveField = (key: string, setter: (value: string) => void) => (value: string) => {
     setter(value);
@@ -356,15 +370,6 @@ export default function AssetForecastPage() {
     setAssetReturnInputs((current) => {
       const next = { ...current, [key]: value };
       LS.set("asset_forecast_asset_returns", JSON.stringify(next));
-      return next;
-    });
-  };
-
-  const saveAssetValueInput = (holding: HoldingItem, value: string) => {
-    const key = assetValueKey(holding);
-    setAssetValueInputs((current) => {
-      const next = { ...current, [key]: value };
-      LS.set("asset_forecast_asset_values", JSON.stringify(next));
       return next;
     });
   };
@@ -629,17 +634,7 @@ export default function AssetForecastPage() {
                               <span className="text-[10px] text-muted-foreground">%</span>
                             </div>
                           </td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
-                              <input
-                                value={row.valueInput}
-                                onChange={(event) => saveAssetValueInput(row.holding, event.target.value)}
-                                inputMode="numeric"
-                                className="w-32 bg-transparent text-right text-[11px] tabular-nums outline-none"
-                              />
-                              <span className="text-[10px] text-muted-foreground">đ</span>
-                            </div>
-                          </td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.startValue)}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2026)}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2027)}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2028)}</td>
@@ -726,6 +721,49 @@ export default function AssetForecastPage() {
                     </tr>
                   ))}
                 </tbody>
+              </table>
+            </div>
+          </Card>
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng tài sản forecast</p>
+            <p className="text-[10px] text-muted-foreground">Fixed asset + tài sản tài chính cuối năm</p>
+          </div>
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-xs">
+                <thead>
+                  <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
+                    <th className="py-2 px-4 text-left font-normal">Tài sản</th>
+                    {FORECAST_YEARS.map((forecastYear) => (
+                      <th key={forecastYear} className="py-2 px-4 text-right font-normal">{forecastYear}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {totalAssetForecastRows.map((row) => (
+                    <tr key={row.key}>
+                      <td className="py-2.5 px-4 font-medium whitespace-nowrap">{row.label}</td>
+                      {row.values.map((value, index) => (
+                        <td key={`${row.key}-${FORECAST_YEARS[index]}`} className="py-2.5 px-4 text-right tabular-nums whitespace-nowrap">
+                          {formatVNDFull(value)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border">
+                    <td className="pt-3 px-4 text-[10px] uppercase tracking-wider text-muted-foreground">Total</td>
+                    {totalAssetValues.map((value, index) => (
+                      <td key={`total-${FORECAST_YEARS[index]}`} className="pt-3 px-4 text-right tabular-nums font-bold whitespace-nowrap">
+                        {formatVNDFull(value)}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </Card>
