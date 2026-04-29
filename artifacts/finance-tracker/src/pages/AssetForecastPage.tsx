@@ -8,7 +8,7 @@ import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum, fetchTotalAssetRows, type 
 import { CURRENT_ASSET_SHEET, parseCurrentAssetRows } from "@/pages/wealthAllocationData";
 import type { HoldingItem } from "@/pages/assets/types";
 
-const FORECAST_YEARS = [2026, 2027, 2028, 2029, 2030];
+const FORECAST_YEARS = Array.from({ length: 2044 - 2026 + 1 }, (_, index) => 2026 + index);
 const INITIAL_2026_FREE_CASH = 7_370_845_000;
 const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto"] as const;
 type InvestType = typeof INVEST_TYPES[number];
@@ -342,7 +342,7 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Biểu đồ forecast tài sản</p>
-            <p className="text-[10px] text-muted-foreground">2026-2030</p>
+            <p className="text-[10px] text-muted-foreground">2026-2044</p>
           </div>
           <Card className="p-4 md:p-5">
             <div className="h-[280px] w-full">
@@ -438,7 +438,7 @@ export default function AssetForecastPage() {
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
               Free cash từ sheet {CASHFLOW_SOURCE_SHEET}
             </p>
-            <p className="text-[10px] text-muted-foreground">2026-2030</p>
+            <p className="text-[10px] text-muted-foreground">2026-2044</p>
           </div>
           <Card className="p-4 md:p-5">
             {freeCashQuery.isLoading ? (
@@ -571,28 +571,29 @@ export default function AssetForecastPage() {
               <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu từ sheet {CURRENT_ASSET_SHEET}.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-xs">
+                <table className="w-full min-w-[2200px] text-xs">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Asset</th>
                       <th className="w-20 py-2 px-2 text-left font-medium">Type</th>
                       <th className="w-24 py-2 px-2 text-right font-medium">Assumed return</th>
                       <th className="py-2 px-4 text-right font-medium">Đầu 2026</th>
-                      <th className="py-2 px-4 text-right font-medium">2026</th>
-                      <th className="py-2 px-4 text-right font-medium">2027</th>
-                      <th className="py-2 px-4 text-right font-medium">2028</th>
-                      <th className="py-2 px-4 text-right font-medium">2029</th>
-                      <th className="py-2 pl-4 text-right font-medium">2030</th>
+                      {FORECAST_YEARS.map((forecastYear, index) => (
+                        <th
+                          key={forecastYear}
+                          className={`${index === FORECAST_YEARS.length - 1 ? "pl-4" : "px-4"} py-2 text-right font-medium`}
+                        >
+                          {forecastYear}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {fixedAssetRows.map((row) => {
-                      const firstYearDetail = firstForecast?.fixedDetails.find((detail) => detail.key === row.key);
-                      const end2026 = firstYearDetail?.endValue ?? row.startValue * (1 + row.returnRate);
-                      const end2027 = end2026 * (1 + row.returnRate);
-                      const end2028 = end2027 * (1 + row.returnRate);
-                      const end2029 = end2028 * (1 + row.returnRate);
-                      const end2030 = end2029 * (1 + row.returnRate);
+                      const fixedEndValues = forecastRows.map((forecastRow, index) => (
+                        forecastRow.fixedDetails.find((detail) => detail.key === row.key)?.endValue ??
+                        row.startValue * (1 + row.returnRate) ** (index + 1)
+                      ));
 
                       return (
                         <tr key={row.key}>
@@ -610,11 +611,14 @@ export default function AssetForecastPage() {
                             </div>
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.startValue)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2026)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2027)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2028)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2029)}</td>
-                          <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2030)}</td>
+                          {fixedEndValues.map((value, index) => (
+                            <td
+                              key={`${row.key}-${FORECAST_YEARS[index]}`}
+                              className={`${index === fixedEndValues.length - 1 ? "pl-4" : "px-4"} py-2 text-right tabular-nums font-semibold whitespace-nowrap`}
+                            >
+                              {formatVNDFull(value)}
+                            </td>
+                          ))}
                         </tr>
                       );
                     })}
@@ -625,11 +629,14 @@ export default function AssetForecastPage() {
                       <td />
                       <td />
                       <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(initialFixedTotal)}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[2]?.fixedEnd ?? forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[3]?.fixedEnd ?? forecastRows[2]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
-                      <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[4]?.fixedEnd ?? forecastRows[3]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
+                      {FORECAST_YEARS.map((forecastYear, index) => (
+                        <td
+                          key={`fixed-total-${forecastYear}`}
+                          className={`${index === FORECAST_YEARS.length - 1 ? "pl-4" : "px-4"} pt-3 text-right tabular-nums font-semibold whitespace-nowrap`}
+                        >
+                          {formatVNDFull(forecastRows[index]?.fixedEnd ?? initialFixedTotal)}
+                        </td>
+                      ))}
                     </tr>
                   </tfoot>
                 </table>
@@ -640,7 +647,7 @@ export default function AssetForecastPage() {
 
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast 2026-2030</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Investment forecast 2026-2044</p>
             <p className="text-[10px] text-muted-foreground">Mỗi tài sản chỉ hiển thị đầu năm và cuối năm</p>
           </div>
           <Card className="overflow-hidden">
