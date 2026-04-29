@@ -127,6 +127,13 @@ function parseInputNumber(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parsePercentInput(value: string): number {
+  const cleaned = value.trim().replace(/[^\d,.-]/g, "");
+  const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function formatPercentValue(value: number) {
   return `${value.toFixed(2)}%`;
 }
@@ -172,7 +179,7 @@ export default function AssetForecastPage() {
       type,
       label: TYPE_LABELS[type],
       startValue: grouped.get(type) ?? 0,
-      returnRate: parseInputNumber(investmentReturnInputs[type] ?? String(DEFAULT_RATES[type])) / 100,
+      returnRate: parsePercentInput(investmentReturnInputs[type] ?? String(DEFAULT_RATES[type])) / 100,
     })).filter((row) => row.startValue !== 0 || allocationRatios[row.type] !== 0);
   }, [allocationRatios, currentAssetRows, investmentReturnInputs]);
 
@@ -187,7 +194,7 @@ export default function AssetForecastPage() {
         symbol: holding.symbol,
         type: holding.type,
         startValue,
-        returnRate: parseInputNumber(returnInput) / 100,
+        returnRate: parsePercentInput(returnInput) / 100,
         returnInput,
         holding,
       }];
