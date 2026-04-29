@@ -326,11 +326,6 @@ export default function AssetForecastPage() {
 
   const firstForecast = forecastRows[0];
   const lastForecast = forecastRows[forecastRows.length - 1];
-  const currentAssetTotal = currentAssetRows.reduce((sum, holding) => {
-    if (isUnallocatedFreeCash(holding)) return sum;
-    const valueInput = assetValueInputs[assetValueKey(holding)];
-    return sum + (valueInput == null ? holding.currentValue ?? 0 : parseInputNumber(valueInput));
-  }, 0);
   const initialInvestmentTotal = investmentStartRows.reduce((sum, row) => sum + row.startValue, 0);
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
   const allocationRatioTotal = INVEST_TYPES.reduce((sum, type) => sum + allocationRatios[type], 0);
@@ -601,40 +596,22 @@ export default function AssetForecastPage() {
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Asset</th>
                       <th className="py-2 px-4 text-left font-medium">Type</th>
-                      <th className="py-2 px-4 text-right font-medium">Current asset</th>
-                      <th className="py-2 px-4 text-right font-medium">Weight</th>
                       <th className="py-2 px-4 text-right font-medium">Assumed return</th>
-                      <th className="py-2 px-4 text-right font-medium">Growth</th>
+                      <th className="py-2 px-4 text-right font-medium">Đầu 2026</th>
                       <th className="py-2 px-4 text-right font-medium">2026</th>
                       <th className="py-2 pl-4 text-right font-medium">2027</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {fixedAssetRows.map((row) => {
-                      const weight = currentAssetTotal > 0 ? row.startValue / currentAssetTotal : null;
                       const firstYearDetail = firstForecast?.fixedDetails.find((detail) => detail.key === row.key);
-                      const growth = firstYearDetail?.gain ?? row.startValue * row.returnRate;
-                      const end2026 = firstYearDetail?.endValue ?? row.startValue + growth;
+                      const end2026 = firstYearDetail?.endValue ?? row.startValue * (1 + row.returnRate);
                       const end2027 = end2026 * (1 + row.returnRate);
 
                       return (
                         <tr key={row.key}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.symbol}</td>
                           <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{formatTypeLabel(row.type)}</td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
-                              <input
-                                value={row.valueInput}
-                                onChange={(event) => saveAssetValueInput(row.holding, event.target.value)}
-                                inputMode="numeric"
-                                className="w-32 bg-transparent text-right text-[11px] tabular-nums outline-none"
-                              />
-                              <span className="text-[10px] text-muted-foreground">đ</span>
-                            </div>
-                          </td>
-                          <td className="py-2 px-4 text-right tabular-nums text-muted-foreground whitespace-nowrap">
-                            {weight == null ? "—" : formatPercentValue(weight * 100)}
-                          </td>
                           <td className="py-2 px-4 text-right whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
                               <input
@@ -646,8 +623,16 @@ export default function AssetForecastPage() {
                               <span className="text-[10px] text-muted-foreground">%</span>
                             </div>
                           </td>
-                          <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${growth >= 0 ? "text-emerald-400" : "text-red-300"}`}>
-                            {formatVNDFull(growth)}
+                          <td className="py-2 px-4 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
+                              <input
+                                value={row.valueInput}
+                                onChange={(event) => saveAssetValueInput(row.holding, event.target.value)}
+                                inputMode="numeric"
+                                className="w-32 bg-transparent text-right text-[11px] tabular-nums outline-none"
+                              />
+                              <span className="text-[10px] text-muted-foreground">đ</span>
+                            </div>
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2026)}</td>
                           <td className="py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(end2027)}</td>
@@ -659,14 +644,8 @@ export default function AssetForecastPage() {
                     <tr className="border-t border-border">
                       <td className="pt-3 pr-4 text-[10px] uppercase tracking-wider text-muted-foreground">Total</td>
                       <td />
-                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(initialFixedTotal)}</td>
-                      <td className="pt-3 px-4 text-right tabular-nums text-muted-foreground">
-                        {currentAssetTotal > 0 ? formatPercentValue((initialFixedTotal / currentAssetTotal) * 100) : "—"}
-                      </td>
                       <td />
-                      <td className={`pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${(firstForecast?.fixedGain ?? 0) >= 0 ? "text-emerald-400" : "text-red-300"}`}>
-                        {formatVNDFull(firstForecast?.fixedGain ?? 0)}
-                      </td>
+                      <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(initialFixedTotal)}</td>
                       <td className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
                       <td className="pt-3 pl-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(forecastRows[1]?.fixedEnd ?? firstForecast?.fixedEnd ?? initialFixedTotal)}</td>
                     </tr>
