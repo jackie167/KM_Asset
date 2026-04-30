@@ -99,6 +99,16 @@ function formatLoanEventType(value: ForecastLoanEvent["eventType"]) {
   }
 }
 
+function normalizeAssetMatcher(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
 export default function AssetForecastPage() {
   const queryClient = useQueryClient();
   const returnRateInput = LS.get("asset_forecast_return_rate", "8");
@@ -221,15 +231,6 @@ export default function AssetForecastPage() {
     }))
   , [fixedAssetRows]);
 
-  const tradeCashByYear = useMemo(() => {
-    const result = new Map<number, number>();
-    for (const trade of forecastTrades) {
-      if (trade.side !== "sell" || getTradeInvestmentType(trade)) continue;
-      result.set(trade.year, (result.get(trade.year) ?? 0) + trade.amount);
-    }
-    return result;
-  }, [forecastTrades]);
-
   const fixedSellByYearAndKey = useMemo(() => {
     const result = new Map<string, number>();
     for (const trade of forecastTrades) {
@@ -240,17 +241,82 @@ export default function AssetForecastPage() {
     return result;
   }, [forecastTrades]);
 
+  const loanEventsWithTradeSettlements = useMemo(() => {
+    const derivedEvents: ForecastLoanEvent[] = [];
+    const settlementByTradeId = new Map<number, number>();
+    const settlementByYear = new Map<number, number>();
+    const netCashByYear = new Map<number, number>();
+    const sortedTrades = [...forecastTrades]
+      .filter((trade) => trade.side === "sell" && !getTradeInvestmentType(trade))
+      .sort((a, b) => a.year - b.year || a.id - b.id);
+
+    for (const trade of sortedTrades) {
+      let remainingCash = Math.max(0, trade.amount);
+      let tradeSettlement = 0;
+      const normalizedTradeAsset = normalizeAssetMatcher(trade.symbol);
+      const matchedLoans = forecastLoans.filter((loan) =>
+        loan.status === "active" &&
+        loan.settleOnAssetSell &&
+        normalizeAssetMatcher(loan.assetSymbol) === normalizedTradeAsset
+      );
+
+      for (const loan of matchedLoans) {
+        if (remainingCash <= 0) break;
+        // Rebuild with prior derived settlements so later trades cannot repay debt that was already cleared.
+        const scheduleWithDerived = buildForecastLoanDetailSchedule(forecastLoans, [
+          ...forecastLoanEvents,
+          ...derivedEvents,
+        ]);
+        const loanRow = scheduleWithDerived.find((row) => row.loanId === loan.id && row.year === trade.year);
+        const outstandingDebt = loanRow?.endingDebt ?? 0;
+        const settlementAmount = Math.min(remainingCash, Math.max(0, outstandingDebt));
+        if (settlementAmount <= 0) continue;
+
+        derivedEvents.push({
+          id: -((trade.id * 1000) + loan.id),
+          loanId: loan.id,
+          year: trade.year,
+          eventType: "settlement",
+          amount: settlementAmount,
+          source: "trade_sell",
+          tradeId: trade.id,
+          note: `Auto settle from sell ${trade.symbol}`,
+        });
+        remainingCash -= settlementAmount;
+        tradeSettlement += settlementAmount;
+      }
+
+      settlementByTradeId.set(trade.id, tradeSettlement);
+      settlementByYear.set(trade.year, (settlementByYear.get(trade.year) ?? 0) + tradeSettlement);
+      netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) + remainingCash);
+    }
+
+    return {
+      events: [...forecastLoanEvents, ...derivedEvents],
+      netCashByYear,
+      settlementByTradeId,
+      settlementByYear,
+    };
+  }, [forecastLoanEvents, forecastLoans, forecastTrades]);
+
+  const tradeCashByYear = loanEventsWithTradeSettlements.netCashByYear;
+  const tradeSettlementByYear = loanEventsWithTradeSettlements.settlementByYear;
+  const tradeSettlementByTradeId = loanEventsWithTradeSettlements.settlementByTradeId;
+
   const loanScheduleRows = useMemo(() => (
-    buildForecastLoanSchedule(forecastLoans, forecastLoanEvents)
-  ), [forecastLoanEvents, forecastLoans]);
+    buildForecastLoanSchedule(forecastLoans, loanEventsWithTradeSettlements.events)
+  ), [forecastLoans, loanEventsWithTradeSettlements.events]);
 
   const loanDetailScheduleRows = useMemo(() => (
-    buildForecastLoanDetailSchedule(forecastLoans, forecastLoanEvents)
-  ), [forecastLoanEvents, forecastLoans]);
+    buildForecastLoanDetailSchedule(forecastLoans, loanEventsWithTradeSettlements.events)
+  ), [forecastLoans, loanEventsWithTradeSettlements.events]);
 
   const debtPrincipalPaymentByYear = useMemo(() => {
-    return new Map(loanScheduleRows.map((row) => [row.year, row.principalPayment + row.settlement]));
-  }, [loanScheduleRows]);
+    return new Map(loanScheduleRows.map((row) => [
+      row.year,
+      Math.max(0, row.principalPayment + row.settlement - (tradeSettlementByYear.get(row.year) ?? 0)),
+    ]));
+  }, [loanScheduleRows, tradeSettlementByYear]);
 
   const debtInterestByYear = useMemo(() => {
     return new Map(loanScheduleRows.map((row) => [row.year, row.interest]));
@@ -668,7 +734,7 @@ export default function AssetForecastPage() {
               <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu free cash từ sheet {CASHFLOW_SOURCE_SHEET}.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1080px] text-xs">
+                <table className="w-full min-w-[1180px] text-xs">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Year</th>
@@ -679,7 +745,8 @@ export default function AssetForecastPage() {
                       <th className="py-2 px-4 text-right font-medium">Total interest</th>
                       <th className="py-2 px-4 text-right font-medium">Tổng income</th>
                       <th className="py-2 px-4 text-right font-medium">Tổng chi</th>
-                      <th className="py-2 px-4 text-right font-medium">Mua/bán tài sản</th>
+                      <th className="py-2 px-4 text-right font-medium">Mua/bán tài sản net</th>
+                      <th className="py-2 px-4 text-right font-medium">Tất toán từ bán</th>
                       <th className="py-2 px-4 text-right font-medium">Trả gốc vay</th>
                       <th className="py-2 pl-4 text-right font-medium">Free cash</th>
                     </tr>
@@ -698,6 +765,7 @@ export default function AssetForecastPage() {
                         freeCash: 0,
                       };
                       const tradeCash = tradeCashByYear.get(year) ?? 0;
+                      const tradeSettlement = tradeSettlementByYear.get(year) ?? 0;
                       const principalPayment = debtPrincipalPaymentByYear.get(year) ?? 0;
                       const loanInterest = debtInterestByYear.get(year) ?? 0;
                       const totalExpense = row.expense + row.otherExpense + loanInterest;
@@ -714,6 +782,9 @@ export default function AssetForecastPage() {
                           <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(totalExpense)}</td>
                           <td className={`py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap ${tradeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                             {tradeCash ? formatVNDFull(tradeCash) : "—"}
+                          </td>
+                          <td className="py-2 px-4 text-right tabular-nums font-medium text-amber-300 whitespace-nowrap">
+                            {tradeSettlement ? formatVNDFull(tradeSettlement) : "—"}
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums font-medium text-red-300 whitespace-nowrap">
                             {principalPayment ? formatVNDFull(principalPayment) : "—"}
@@ -795,7 +866,7 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Buy/Sell forecast</p>
-            <p className="text-[10px] text-muted-foreground">Sell làm giảm tài sản và tăng free cash cùng năm</p>
+            <p className="text-[10px] text-muted-foreground">Sell fixed asset, tất toán vay gắn tài sản trước khi vào free cash</p>
           </div>
           <Card className="p-4 md:p-5">
             {forecastTradesQuery.isLoading ? (
@@ -808,46 +879,54 @@ export default function AssetForecastPage() {
               <p className="text-xs text-muted-foreground">Chưa có giao dịch forecast.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-xs">
+                <table className="w-full min-w-[920px] text-xs">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Year</th>
                       <th className="py-2 px-4 text-left font-medium">Side</th>
                       <th className="py-2 px-4 text-left font-medium">Asset</th>
                       <th className="py-2 px-4 text-right font-medium">Amount</th>
+                      <th className="py-2 px-4 text-right font-medium">Tất toán vay</th>
+                      <th className="py-2 px-4 text-right font-medium">Net cash</th>
                       <th className="py-2 px-4 text-left font-medium">Note</th>
                       <th className="py-2 pl-4 text-right font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/40">
-                    {forecastTrades.map((trade) => (
-                      <tr key={trade.id}>
-                        <td className="py-2 pr-4 font-medium whitespace-nowrap">{trade.year}</td>
-                        <td className="py-2 px-4 uppercase text-muted-foreground whitespace-nowrap">{trade.side}</td>
-                        <td className="py-2 px-4 whitespace-nowrap">{trade.symbol} <span className="text-muted-foreground">({formatTypeLabel(trade.assetType)})</span></td>
-                        <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(trade.amount)}</td>
-                        <td className="py-2 px-4 text-muted-foreground">{trade.note || "—"}</td>
-                        <td className="py-2 pl-4 text-right whitespace-nowrap space-x-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs text-muted-foreground"
-                            onClick={() => openEditTradeDialog(trade)}
-                          >
-                            Sửa
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs text-muted-foreground"
-                            disabled={deleteTradeMutation.isPending}
-                            onClick={() => deleteTradeMutation.mutate(trade.id)}
-                          >
-                            Xóa
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    {forecastTrades.map((trade) => {
+                      const settlement = tradeSettlementByTradeId.get(trade.id) ?? 0;
+                      const netCash = Math.max(0, trade.amount - settlement);
+                      return (
+                        <tr key={trade.id}>
+                          <td className="py-2 pr-4 font-medium whitespace-nowrap">{trade.year}</td>
+                          <td className="py-2 px-4 uppercase text-muted-foreground whitespace-nowrap">{trade.side}</td>
+                          <td className="py-2 px-4 whitespace-nowrap">{trade.symbol} <span className="text-muted-foreground">({formatTypeLabel(trade.assetType)})</span></td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(trade.amount)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-medium text-amber-300 whitespace-nowrap">{settlement ? formatVNDFull(settlement) : "—"}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-semibold text-emerald-400 whitespace-nowrap">{formatVNDFull(netCash)}</td>
+                          <td className="py-2 px-4 text-muted-foreground">{trade.note || "—"}</td>
+                          <td className="py-2 pl-4 text-right whitespace-nowrap space-x-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-muted-foreground"
+                              onClick={() => openEditTradeDialog(trade)}
+                            >
+                              Sửa
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-muted-foreground"
+                              disabled={deleteTradeMutation.isPending}
+                              onClick={() => deleteTradeMutation.mutate(trade.id)}
+                            >
+                              Xóa
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1273,7 +1352,7 @@ export default function AssetForecastPage() {
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Loan forecast</p>
-                <p className="text-[10px] text-muted-foreground">Tạm tách khỏi Wealth/Financial, chưa ghi nhận trả gốc</p>
+                <p className="text-[10px] text-muted-foreground">Trade sell tự tất toán khoản vay gắn tài sản khi bật settle</p>
               </div>
               <Card className="overflow-hidden">
                 <div className="border-b border-border/40 px-4 py-3 text-xs text-muted-foreground">
