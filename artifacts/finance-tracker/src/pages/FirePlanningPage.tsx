@@ -106,21 +106,27 @@ function ProgressBar({ pct, tone }: { pct: number; tone: Tone }) {
   );
 }
 
-function NumberInput({ label, value, onChange, unit, min = 0 }: {
-  label: string; value: number; onChange: (v: number) => void; unit?: string; min?: number;
+function StepInput({ label, value, onChange, step, min, format }: {
+  label: string; value: number; onChange: (v: number) => void;
+  step: number; min?: number; format: (v: number) => string;
 }) {
+  const dec = () => { const next = value - step; onChange(min != null ? Math.max(min, next) : next); };
+  const inc = () => onChange(value + step);
   return (
     <div className="space-y-1">
-      <label className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</label>
-      <div className="flex items-center gap-1.5">
-        <input
-          type="number"
-          min={min}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-        {unit && <span className="text-xs text-muted-foreground shrink-0">{unit}</span>}
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wider leading-tight">{label}</p>
+      <div className="flex items-center rounded border border-border overflow-hidden">
+        <button type="button" onClick={dec}
+          className="px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors shrink-0 select-none">
+          −
+        </button>
+        <span className="flex-1 text-center text-sm tabular-nums font-medium py-1.5 px-1 min-w-0 truncate">
+          {format(value)}
+        </span>
+        <button type="button" onClick={inc}
+          className="px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors shrink-0 select-none">
+          +
+        </button>
       </div>
     </div>
   );
@@ -312,17 +318,47 @@ export default function FirePlanningPage() {
         <section className="space-y-2">
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Thông số cá nhân</p>
           <Card className="p-4 md:p-5">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              <NumberInput label="Chi tiêu/năm (0=tự động)" value={customSpend}
-                onChange={(v) => { setCustomSpend(v); save("fire_spend", v); }} unit="đ" />
-              <NumberInput label="Withdrawal Rate" value={withdrawalRate}
-                onChange={(v) => { setWithdrawalRate(v); save("fire_wr", v); }} unit="%" min={1} />
-              <NumberInput label="Lãi suất kỳ vọng" value={expectedReturn}
-                onChange={(v) => { setExpectedReturn(v); save("fire_ret", v); }} unit="%" />
-              <NumberInput label="Tuổi hiện tại" value={currentAge}
-                onChange={(v) => { setCurrentAge(v); save("fire_age", v); }} />
-              <NumberInput label="Tuổi mục tiêu FIRE" value={targetAge}
-                onChange={(v) => { setTargetAge(v); save("fire_target_age", v); }} />
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <StepInput
+                label="Chi tiêu/năm"
+                value={customSpend > 0 ? customSpend : autoSpend}
+                step={10_000_000}
+                min={0}
+                format={(v) => v === 0 ? "Tự động" : `${(v / 1_000_000).toFixed(0)}M`}
+                onChange={(v) => { setCustomSpend(v); save("fire_spend", v); }}
+              />
+              <StepInput
+                label="Withdrawal Rate"
+                value={withdrawalRate}
+                step={0.5}
+                min={0.5}
+                format={(v) => `${v}%`}
+                onChange={(v) => { setWithdrawalRate(v); save("fire_wr", v); }}
+              />
+              <StepInput
+                label="Lãi suất kỳ vọng"
+                value={expectedReturn}
+                step={0.5}
+                min={0}
+                format={(v) => `${v}%`}
+                onChange={(v) => { setExpectedReturn(v); save("fire_ret", v); }}
+              />
+              <StepInput
+                label="Tuổi hiện tại"
+                value={currentAge}
+                step={1}
+                min={1}
+                format={(v) => `${v} tuổi`}
+                onChange={(v) => { setCurrentAge(v); save("fire_age", v); }}
+              />
+              <StepInput
+                label="Tuổi mục tiêu FIRE"
+                value={targetAge}
+                step={1}
+                min={1}
+                format={(v) => `${v} tuổi`}
+                onChange={(v) => { setTargetAge(v); save("fire_target_age", v); }}
+              />
             </div>
             {autoSpend > 0 && customSpend === 0 && (
               <p className="mt-3 text-[11px] text-muted-foreground">
