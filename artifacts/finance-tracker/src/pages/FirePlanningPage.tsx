@@ -112,16 +112,16 @@ function StepInput({ label, value, onChange, step, min, format }: {
 }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isRepeatingRef = useRef(false);
+  const wasRepeatingRef = useRef(false);
   const valueRef = useRef(value);
   valueRef.current = value;
 
   const clamp = (v: number) => min != null ? Math.max(min, v) : v;
 
-  const startHold = (delta: number) => {
-    isRepeatingRef.current = false;
+  const startPress = (delta: number) => {
+    wasRepeatingRef.current = false;
     timerRef.current = setTimeout(() => {
-      isRepeatingRef.current = true;
+      wasRepeatingRef.current = true;
       intervalRef.current = setInterval(() => {
         valueRef.current = clamp(valueRef.current + delta);
         onChange(valueRef.current);
@@ -129,28 +129,27 @@ function StepInput({ label, value, onChange, step, min, format }: {
     }, 2000);
   };
 
-  const stopHold = (delta: number) => {
+  const clearPress = () => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    if (!isRepeatingRef.current) {
-      onChange(clamp(valueRef.current + delta));
-    }
-    isRepeatingRef.current = false;
   };
 
-  const cancelHold = () => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    isRepeatingRef.current = false;
+  // Single tap: fires after mouseup (click) — skip if auto-repeat already ran
+  const handleTap = (delta: number) => {
+    clearPress();
+    if (!wasRepeatingRef.current) {
+      onChange(clamp(valueRef.current + delta));
+    }
+    wasRepeatingRef.current = false;
   };
 
   const btnProps = (delta: number) => ({
     type: "button" as const,
-    onMouseDown: () => startHold(delta),
-    onMouseUp: () => stopHold(delta),
-    onMouseLeave: cancelHold,
-    onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); startHold(delta); },
-    onTouchEnd: () => stopHold(delta),
+    onMouseDown: () => startPress(delta),
+    onMouseUp: () => handleTap(delta),
+    onMouseLeave: () => { clearPress(); wasRepeatingRef.current = false; },
+    onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); startPress(delta); },
+    onTouchEnd: (e: React.TouchEvent) => { e.preventDefault(); handleTap(delta); },
     className: "px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 active:bg-muted/60 transition-colors shrink-0 select-none",
   });
 
