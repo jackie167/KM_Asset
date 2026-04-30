@@ -1285,81 +1285,107 @@ export default function AssetForecastPage() {
                   </span>
                 </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-xs">
+                    <table className="w-full min-w-[2200px] text-xs">
                       <thead>
                         <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
-                          <th className="py-2 px-4 text-left font-normal">Năm</th>
-                          <th className="py-2 px-4 text-right font-normal">Nợ đầu năm</th>
-                          <th className="py-2 px-4 text-right font-normal">Vay thêm</th>
-                          <th className="py-2 px-4 text-right font-normal">Lãi vay</th>
-                          <th className="py-2 px-4 text-right font-normal">Trả gốc</th>
-                          <th className="py-2 px-4 text-right font-normal">Nợ cuối năm</th>
+                          <th className="sticky left-0 z-[1] bg-card py-2 px-4 text-left font-normal">Nội dung</th>
+                          {debtRows.map((row) => (
+                            <th
+                              key={`loan-total-year-${row.year}`}
+                              className={`py-2 px-4 text-right font-normal ${row.year === new Date().getFullYear() ? "text-primary" : ""}`}
+                            >
+                              {row.year}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/40">
-                        {debtRows.map((row) => {
-                          const isCurrentYear = row.year === new Date().getFullYear();
-                          return (
-                            <tr key={row.year} className={isCurrentYear ? "bg-primary/5" : ""}>
-                              <td className={`py-2.5 px-4 font-semibold ${isCurrentYear ? "text-primary" : ""}`}>
-                                {row.year}{isCurrentYear && <span className="ml-1.5 text-[9px] text-primary/70 uppercase tracking-wider">hiện tại</span>}
-                              </td>
-                              <td className="py-2.5 px-4 text-right tabular-nums text-muted-foreground">
-                                {formatVNDFull(row.openingDebt)}
-                              </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.drawdown > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
-                                {row.drawdown > 0 ? formatVNDFull(row.drawdown) : "—"}
-                              </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.interest > 0 ? "text-red-300" : "text-muted-foreground"}`}>
-                                {row.interest > 0 ? formatVNDFull(row.interest) : "—"}
-                              </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.principalPayment > 0 ? "text-red-300" : "text-muted-foreground"}`}>
-                                {row.principalPayment > 0 ? formatVNDFull(row.principalPayment) : "—"}
-                              </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-semibold ${row.endingDebt > 0 ? "text-amber-400" : "text-emerald-400"}`}>
-                                {row.endingDebt > 0 ? formatVNDFull(row.endingDebt) : "Đã trả hết"}
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {[
+                          { key: "openingDebt", label: "Nợ đầu năm", tone: "muted" },
+                          { key: "drawdown", label: "Vay thêm", tone: "positive" },
+                          { key: "interest", label: "Lãi vay", tone: "negative" },
+                          { key: "principalPayment", label: "Trả gốc", tone: "negative" },
+                          { key: "settlement", label: "Tất toán", tone: "negative" },
+                          { key: "endingDebt", label: "Nợ cuối năm", tone: "debt" },
+                        ].map((metric) => (
+                          <tr key={metric.key}>
+                            <td className="sticky left-0 z-[1] bg-card py-2.5 px-4 font-medium whitespace-nowrap">{metric.label}</td>
+                            {debtRows.map((row) => {
+                              const value = row[metric.key as keyof typeof row] as number;
+                              const className =
+                                metric.tone === "positive"
+                                  ? value > 0 ? "text-emerald-400" : "text-muted-foreground"
+                                  : metric.tone === "negative"
+                                    ? value > 0 ? "text-red-300" : "text-muted-foreground"
+                                    : metric.tone === "debt"
+                                      ? value > 0 ? "text-amber-400 font-semibold" : "text-emerald-400 font-semibold"
+                                      : "text-muted-foreground";
+                              return (
+                                <td key={`${metric.key}-${row.year}`} className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${className}`}>
+                                  {value > 0 ? formatVNDFull(value) : metric.key === "endingDebt" ? "Đã trả hết" : "—"}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
                   <div className="border-t border-border/40 px-4 py-3">
                     <p className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">Chi tiết theo từng khoản vay</p>
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[860px] text-xs">
+                      <table className="w-full min-w-[2200px] text-xs">
                         <thead>
                           <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
-                            <th className="py-2 pr-4 text-left font-normal">Năm</th>
-                            <th className="py-2 px-4 text-left font-normal">Khoản vay</th>
-                            <th className="py-2 px-4 text-right font-normal">Nợ đầu năm</th>
-                            <th className="py-2 px-4 text-right font-normal">Lãi vay</th>
-                            <th className="py-2 px-4 text-right font-normal">Trả gốc</th>
-                            <th className="py-2 px-4 text-right font-normal">Tất toán</th>
-                            <th className="py-2 pl-4 text-right font-normal">Nợ cuối năm</th>
+                            <th className="sticky left-0 z-[1] bg-card py-2 pr-4 text-left font-normal">Khoản vay / nội dung</th>
+                            {debtRows.map((row) => (
+                              <th
+                                key={`loan-detail-year-${row.year}`}
+                                className={`py-2 px-4 text-right font-normal ${row.year === new Date().getFullYear() ? "text-primary" : ""}`}
+                              >
+                                {row.year}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/40">
-                          {detailRows.map((row) => (
-                            <tr key={`${row.year}-${row.loanId}`}>
-                              <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
-                              <td className="py-2 px-4 whitespace-nowrap">{row.assetSymbol ?? row.loanName}</td>
-                              <td className="py-2 px-4 text-right tabular-nums text-muted-foreground whitespace-nowrap">{formatVNDFull(row.openingDebt)}</td>
-                              <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.interest > 0 ? "text-red-300" : "text-muted-foreground"}`}>
-                                {row.interest > 0 ? formatVNDFull(row.interest) : "—"}
-                              </td>
-                              <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.principalPayment > 0 ? "text-red-300" : "text-muted-foreground"}`}>
-                                {row.principalPayment > 0 ? formatVNDFull(row.principalPayment) : "—"}
-                              </td>
-                              <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.settlement > 0 ? "text-red-300" : "text-muted-foreground"}`}>
-                                {row.settlement > 0 ? formatVNDFull(row.settlement) : "—"}
-                              </td>
-                              <td className={`py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap ${row.endingDebt > 0 ? "text-amber-400" : "text-emerald-400"}`}>
-                                {row.endingDebt > 0 ? formatVNDFull(row.endingDebt) : "Đã trả hết"}
-                              </td>
-                            </tr>
-                          ))}
+                          {forecastLoans.flatMap((loan) => {
+                            const rowsByYear = new Map(detailRows.filter((row) => row.loanId === loan.id).map((row) => [row.year, row]));
+                            return [
+                              <tr key={`loan-${loan.id}`} className="bg-muted/20">
+                                <td colSpan={debtRows.length + 1} className="py-2 pr-4 font-semibold text-foreground">{loan.assetSymbol}</td>
+                              </tr>,
+                              ...[
+                                { key: "openingDebt", label: "Nợ đầu năm", tone: "muted" },
+                                { key: "drawdown", label: "Vay thêm", tone: "positive" },
+                                { key: "interest", label: "Lãi vay", tone: "negative" },
+                                { key: "principalPayment", label: "Trả gốc", tone: "negative" },
+                                { key: "settlement", label: "Tất toán", tone: "negative" },
+                                { key: "endingDebt", label: "Nợ cuối năm", tone: "debt" },
+                              ].map((metric) => (
+                                <tr key={`loan-${loan.id}-${metric.key}`}>
+                                  <td className="sticky left-0 z-[1] bg-card py-2.5 pr-4 pl-6 font-medium whitespace-nowrap">{metric.label}</td>
+                                  {debtRows.map((yearRow) => {
+                                    const row = rowsByYear.get(yearRow.year);
+                                    const value = row ? row[metric.key as keyof typeof row] as number : 0;
+                                    const className =
+                                      metric.tone === "positive"
+                                        ? value > 0 ? "text-emerald-400" : "text-muted-foreground"
+                                        : metric.tone === "negative"
+                                          ? value > 0 ? "text-red-300" : "text-muted-foreground"
+                                          : metric.tone === "debt"
+                                            ? value > 0 ? "text-amber-400 font-semibold" : "text-emerald-400 font-semibold"
+                                            : "text-muted-foreground";
+                                    return (
+                                      <td key={`loan-${loan.id}-${metric.key}-${yearRow.year}`} className={`py-2.5 px-4 text-right tabular-nums whitespace-nowrap ${className}`}>
+                                        {value > 0 ? formatVNDFull(value) : metric.key === "endingDebt" ? "Đã trả hết" : "—"}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              )),
+                            ];
+                          })}
                         </tbody>
                       </table>
                     </div>
