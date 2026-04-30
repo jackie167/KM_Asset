@@ -152,7 +152,7 @@ export type ForecastTotalsInput = {
   assetReturnRates: Record<string, number>;
 };
 
-export type ForecastYearTotal = { year: number; totalEnd: number };
+export type ForecastYearTotal = { year: number; totalEnd: number; investmentEnd: number; endYearFreeCash: number };
 
 export function computeForecastTotals({
   currentAssetRows, freeCashRows, forecastTrades,
@@ -231,6 +231,6 @@ export function computeForecastTotals({
     }
 
     const endYearFreeCash = (baseFreeCashByYear.get(forecastYear) ?? 0) + (tradeCashByYear.get(forecastYear) ?? 0);
-    return { year: forecastYear, totalEnd: investmentEnd + fixedEnd + endYearFreeCash };
+    return { year: forecastYear, totalEnd: investmentEnd + fixedEnd + endYearFreeCash, investmentEnd, endYearFreeCash };
   });
 }

@@ -194,10 +194,12 @@ export default function FirePlanningPage() {
 
   // Time to FIRE — derived from forecast table (same data as AssetForecastPage)
   const forecastTotals = useMemo(() => {
+    // Wait until all 3 queries finish to avoid flash with partial data
+    if (forecastAssetQuery.isLoading || forecastCashQuery.isLoading || forecastTradesQuery.isLoading) return null;
+
     const currentAssetRows = forecastAssetQuery.data ?? [];
     const freeCashRows = forecastCashQuery.data ?? [];
     const forecastTrades = forecastTradesQuery.data ?? [];
-    if (!currentAssetRows.length && !freeCashRows.length) return null;
 
     const allocationRecord = readJsonRecord(DB_KEYS.allocationRatios);
     const investReturnRecord = readJsonRecord(DB_KEYS.investmentReturns);
@@ -218,20 +220,23 @@ export default function FirePlanningPage() {
     );
 
     return computeForecastTotals({ currentAssetRows, freeCashRows, forecastTrades, allocationRatios, investmentReturnRates, assetReturnRates });
-  }, [forecastAssetQuery.data, forecastCashQuery.data, forecastTradesQuery.data]);
+  }, [forecastAssetQuery.isLoading, forecastAssetQuery.data, forecastCashQuery.isLoading, forecastCashQuery.data, forecastTradesQuery.isLoading, forecastTradesQuery.data]);
 
   const { yearsLeft, fireYear } = useMemo(() => {
     if (!fireNumber || fireNumber <= 0 || !forecastTotals) {
       return { yearsLeft: null, fireYear: null };
     }
-    const crossing = forecastTotals.find((row) => row.totalEnd >= fireNumber);
-    if (!crossing) return { yearsLeft: null, fireYear: null };
     const currentYear = new Date().getFullYear();
-    return {
-      fireYear: crossing.year,
-      yearsLeft: crossing.year - currentYear,
-    };
-  }, [forecastTotals, fireNumber]);
+    const crossing = forecastTotals.find((row) => {
+      // Compare the right value based on what fireAssets counts
+      const comparableEnd = fireAssetMode === "investment"
+        ? row.investmentEnd + row.endYearFreeCash
+        : row.totalEnd;
+      return comparableEnd >= fireNumber;
+    });
+    if (!crossing) return { yearsLeft: null, fireYear: null };
+    return { fireYear: crossing.year, yearsLeft: crossing.year - currentYear };
+  }, [forecastTotals, fireNumber, fireAssetMode]);
 
   // Coast FIRE
   const yearsToTarget = Math.max(targetAge - currentAge, 0);
