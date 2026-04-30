@@ -324,7 +324,7 @@ export default function FirePlanningPage() {
                 value={customSpend > 0 ? customSpend : autoSpend}
                 step={10_000_000}
                 min={0}
-                format={(v) => v === 0 ? "Tự động" : `${(v / 1_000_000).toFixed(0)}M`}
+                format={(v) => v === 0 ? "Tự động" : `${v.toLocaleString("vi-VN")} đ`}
                 onChange={(v) => { setCustomSpend(v); save("fire_spend", v); }}
               />
               <StepInput
