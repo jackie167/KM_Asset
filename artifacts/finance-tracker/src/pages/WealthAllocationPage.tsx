@@ -178,6 +178,10 @@ export default function WealthAllocationPage() {
   });
 
   const handleOpenAssetType = (type: string) => {
+    if (type === "financial") {
+      navigate("/assets");
+      return;
+    }
     navigate(`/wealth-allocation/type/${encodeURIComponent(type)}`);
   };
 
