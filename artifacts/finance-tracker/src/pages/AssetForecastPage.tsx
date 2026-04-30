@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, fetchTotalAssetRows, type TotalAssetRow } from "@/lib/excel-sheets";
+import { CASHFLOW_SOURCE_SHEET, fetchTotalAssetRows } from "@/lib/excel-sheets";
 import { CURRENT_ASSET_SHEET } from "@/pages/wealthAllocationData";
 import {
   FORECAST_YEARS, INITIAL_2026_FREE_CASH, INVEST_TYPES, type InvestType,
@@ -212,9 +212,49 @@ export default function AssetForecastPage() {
     return result;
   }, [forecastTrades]);
 
+  const loanScheduleRows = useMemo(() => {
+    const sourceRows = [...(loanRowsQuery.data ?? [])]
+      .filter((row) => Number.isFinite(row.year))
+      .sort((left, right) => left.year - right.year);
+    const debtByYear = new Map(sourceRows.map((row) => [row.year, row.debt]));
+    const initialDebt = sourceRows.filter((row) => row.year < FORECAST_YEARS[0]).at(-1)?.debt ?? 0;
+
+    return FORECAST_YEARS.reduce<{
+      previousDebt: number;
+      rows: Array<{ year: number; openingDebt: number; drawdown: number; principalPayment: number; endingDebt: number }>;
+    }>((state, year) => {
+      const openingDebt = state.previousDebt;
+      const endingDebt = debtByYear.get(year) ?? openingDebt;
+      const drawdown = Math.max(0, endingDebt - openingDebt);
+      const principalPayment = Math.max(0, openingDebt - endingDebt);
+
+      return {
+        previousDebt: endingDebt,
+        rows: [...state.rows, { year, openingDebt, drawdown, principalPayment, endingDebt }],
+      };
+    }, { previousDebt: initialDebt, rows: [] }).rows;
+  }, [loanRowsQuery.data]);
+
+  const debtPrincipalPaymentByYear = useMemo(() => {
+    return new Map(loanScheduleRows.map((row) => [row.year, row.principalPayment]));
+  }, [loanScheduleRows]);
+
+  const debtEndByYear = useMemo(() => {
+    return new Map(loanScheduleRows.map((row) => [row.year, row.endingDebt]));
+  }, [loanScheduleRows]);
+
   const baseFreeCashByYear = useMemo(() => {
     return new Map(freeCashRows.map((row) => [row.year, row.freeCash]));
   }, [freeCashRows]);
+
+  const finalFreeCashByYear = useMemo(() => {
+    return new Map(FORECAST_YEARS.map((year) => [
+      year,
+      (baseFreeCashByYear.get(year) ?? 0) +
+        (tradeCashByYear.get(year) ?? 0) -
+        (debtPrincipalPaymentByYear.get(year) ?? 0),
+    ]));
+  }, [baseFreeCashByYear, debtPrincipalPaymentByYear, tradeCashByYear]);
 
   const allocationRows = useMemo(() => {
     const rows = new Map<number, number>();
@@ -222,7 +262,7 @@ export default function AssetForecastPage() {
     for (const row of freeCashRows) {
       const allocationYear = row.year + 1;
       if (FORECAST_YEARS.includes(allocationYear)) {
-        rows.set(allocationYear, row.freeCash + (tradeCashByYear.get(row.year) ?? 0));
+        rows.set(allocationYear, finalFreeCashByYear.get(row.year) ?? 0);
       }
     }
     return FORECAST_YEARS.map((year) => ({
@@ -233,7 +273,7 @@ export default function AssetForecastPage() {
         return acc;
       }, {} as Record<InvestType, number>),
     }));
-  }, [allocationRatios, freeCashRows, tradeCashByYear]);
+  }, [allocationRatios, finalFreeCashByYear, freeCashRows]);
 
   const forecastRows = useMemo(() => {
     const investmentValues = INVEST_TYPES.reduce<Record<InvestType, number>>((acc, type) => {
@@ -244,7 +284,7 @@ export default function AssetForecastPage() {
 
     return FORECAST_YEARS.map((forecastYear) => {
       const allocation = allocationRows.find((row) => row.year === forecastYear);
-      const endYearFreeCash = (baseFreeCashByYear.get(forecastYear) ?? 0) + (tradeCashByYear.get(forecastYear) ?? 0);
+      const endYearFreeCash = finalFreeCashByYear.get(forecastYear) ?? 0;
       const investmentDetails = INVEST_TYPES.map((type) => {
         const startValue = investmentValues[type] ?? 0;
         const allocationValue = allocation?.byType[type] ?? 0;
@@ -276,6 +316,8 @@ export default function AssetForecastPage() {
       const fixedEnd = fixedDetails.reduce((sum, row) => sum + row.endValue, 0);
       const totalStart = investmentStart + fixedStart;
       const totalEnd = investmentEnd + fixedEnd + endYearFreeCash;
+      const debtEnd = debtEndByYear.get(forecastYear) ?? 0;
+      const netAssetEnd = totalEnd - debtEnd;
 
       return {
         year: forecastYear,
@@ -291,12 +333,14 @@ export default function AssetForecastPage() {
         fixedGain,
         fixedEnd,
         endYearFreeCash,
+        debtEnd,
+        netAssetEnd,
         totalStart,
         totalEnd,
         totalIncrease: totalEnd - totalStart,
       };
     });
-  }, [allocationRows, baseFreeCashByYear, fixedAssetRows, fixedSellByYearAndKey, investmentStartRows, tradeCashByYear]);
+  }, [allocationRows, debtEndByYear, finalFreeCashByYear, fixedAssetRows, fixedSellByYearAndKey, investmentStartRows]);
 
   const firstForecast = forecastRows[0];
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
@@ -330,9 +374,12 @@ export default function AssetForecastPage() {
   const totalAssetValues = FORECAST_YEARS.map((_, index) => (
     totalAssetForecastRows.reduce((sum, row) => sum + row.values[index], 0)
   ));
+  const netAssetValues = FORECAST_YEARS.map((forecastYear, index) => (
+    totalAssetValues[index] - (debtEndByYear.get(forecastYear) ?? 0)
+  ));
   const totalAssetChartData = FORECAST_YEARS.map((forecastYear, index) => ({
     year: String(forecastYear),
-    value: totalAssetValues[index],
+    value: netAssetValues[index],
   }));
 
   const saveAllocationInput = (type: InvestType, value: string) => {
@@ -476,7 +523,7 @@ export default function AssetForecastPage() {
                     width={72}
                   />
                   <Tooltip
-                    formatter={(value: number) => [formatVNDFull(value), "Tổng tài sản"]}
+                    formatter={(value: number) => [formatVNDFull(value), "Net asset"]}
                     labelFormatter={(label) => `Năm ${label}`}
                     contentStyle={{
                       background: "hsl(var(--card))",
@@ -510,7 +557,7 @@ export default function AssetForecastPage() {
           </div>
           <Card className="p-4 md:p-5">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-xs">
+              <table className="w-full min-w-[1280px] text-xs">
                 <thead>
                   <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                     <th className="py-2 pr-4 text-left font-medium">Year</th>
@@ -522,7 +569,9 @@ export default function AssetForecastPage() {
                     <th className="py-2 px-4 text-right font-medium">Fixed start</th>
                     <th className="py-2 px-4 text-right font-medium">Fixed gain</th>
                     <th className="py-2 px-4 text-right font-medium">Fixed end</th>
-                    <th className="py-2 pl-4 text-right font-medium">Total end</th>
+                    <th className="py-2 px-4 text-right font-medium">Gross end</th>
+                    <th className="py-2 px-4 text-right font-medium">Debt end</th>
+                    <th className="py-2 pl-4 text-right font-medium">Net end</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -537,7 +586,9 @@ export default function AssetForecastPage() {
                       <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.fixedStart)}</td>
                       <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.fixedGain >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(row.fixedGain)}</td>
                       <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.fixedEnd)}</td>
-                      <td className="py-2 pl-4 text-right tabular-nums font-bold whitespace-nowrap">{formatVNDFull(row.totalEnd)}</td>
+                      <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(row.totalEnd)}</td>
+                      <td className="py-2 px-4 text-right tabular-nums text-amber-300 whitespace-nowrap">{formatVNDFull(row.debtEnd)}</td>
+                      <td className="py-2 pl-4 text-right tabular-nums font-bold whitespace-nowrap">{formatVNDFull(row.netAssetEnd)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -564,7 +615,7 @@ export default function AssetForecastPage() {
               <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu free cash từ sheet {CASHFLOW_SOURCE_SHEET}.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-xs">
+                <table className="w-full min-w-[1080px] text-xs">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Year</th>
@@ -576,6 +627,7 @@ export default function AssetForecastPage() {
                       <th className="py-2 px-4 text-right font-medium">Tổng income</th>
                       <th className="py-2 px-4 text-right font-medium">Tổng chi</th>
                       <th className="py-2 px-4 text-right font-medium">Mua/bán tài sản</th>
+                      <th className="py-2 px-4 text-right font-medium">Trả gốc vay</th>
                       <th className="py-2 pl-4 text-right font-medium">Free cash</th>
                     </tr>
                   </thead>
@@ -593,7 +645,8 @@ export default function AssetForecastPage() {
                         freeCash: 0,
                       };
                       const tradeCash = tradeCashByYear.get(year) ?? 0;
-                      const freeCash = row.freeCash + tradeCash;
+                      const principalPayment = debtPrincipalPaymentByYear.get(year) ?? 0;
+                      const freeCash = finalFreeCashByYear.get(year) ?? 0;
                       return (
                         <tr key={row.year}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
@@ -606,6 +659,9 @@ export default function AssetForecastPage() {
                           <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(row.totalExpense)}</td>
                           <td className={`py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap ${tradeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                             {tradeCash ? formatVNDFull(tradeCash) : "—"}
+                          </td>
+                          <td className="py-2 px-4 text-right tabular-nums font-medium text-red-300 whitespace-nowrap">
+                            {principalPayment ? formatVNDFull(principalPayment) : "—"}
                           </td>
                           <td className={`py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap ${freeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                             {formatVNDFull(freeCash)}
@@ -904,7 +960,7 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng tài sản forecast</p>
-            <p className="text-[10px] text-muted-foreground">Fixed asset + tài sản tài chính cuối năm</p>
+            <p className="text-[10px] text-muted-foreground">Gross asset - debt = net asset</p>
           </div>
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
@@ -928,12 +984,28 @@ export default function AssetForecastPage() {
                       ))}
                     </tr>
                   ))}
+                  <tr>
+                    <td className="py-2.5 px-4 font-medium text-amber-300 whitespace-nowrap">Debt cuối năm</td>
+                    {FORECAST_YEARS.map((forecastYear) => (
+                      <td key={`debt-${forecastYear}`} className="py-2.5 px-4 text-right tabular-nums text-amber-300 whitespace-nowrap">
+                        {formatVNDFull(debtEndByYear.get(forecastYear) ?? 0)}
+                      </td>
+                    ))}
+                  </tr>
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-border">
-                    <td className="pt-3 px-4 text-[10px] uppercase tracking-wider text-muted-foreground">Total</td>
+                    <td className="pt-3 px-4 text-[10px] uppercase tracking-wider text-muted-foreground">Gross asset</td>
                     {totalAssetValues.map((value, index) => (
-                      <td key={`total-${FORECAST_YEARS[index]}`} className="pt-3 px-4 text-right tabular-nums font-bold whitespace-nowrap">
+                      <td key={`gross-${FORECAST_YEARS[index]}`} className="pt-3 px-4 text-right tabular-nums font-semibold whitespace-nowrap">
+                        {formatVNDFull(value)}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="pt-2 px-4 text-[10px] uppercase tracking-wider text-muted-foreground">Net asset</td>
+                    {netAssetValues.map((value, index) => (
+                      <td key={`net-${FORECAST_YEARS[index]}`} className="pt-2 px-4 text-right tabular-nums font-bold whitespace-nowrap">
                         {formatVNDFull(value)}
                       </td>
                     ))}
@@ -946,31 +1018,35 @@ export default function AssetForecastPage() {
 
         {/* ── Theo dõi khoản vay ───────────────────────────────────────── */}
         {(() => {
-          const rows: TotalAssetRow[] = loanRowsQuery.data ?? [];
-          const debtRows = rows.filter((r, i, arr) => r.debt > 0 || (arr[i - 1]?.debt ?? 0) > 0);
+          const debtRows = loanScheduleRows.filter((row) =>
+            row.openingDebt > 0 || row.drawdown > 0 || row.principalPayment > 0 || row.endingDebt > 0
+          );
           if (!loanRowsQuery.isLoading && debtRows.length === 0) return null;
           return (
             <section className="space-y-2">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Theo dõi khoản vay</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Loan forecast từ sheet Total Asset</p>
+                <p className="text-[10px] text-muted-foreground">Trả gốc vay đã trừ vào free cash</p>
+              </div>
               <Card className="overflow-hidden">
                 {loanRowsQuery.isLoading ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">Loading...</div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[480px] text-xs">
+                    <table className="w-full min-w-[720px] text-xs">
                       <thead>
                         <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
                           <th className="py-2 px-4 text-left font-normal">Năm</th>
                           <th className="py-2 px-4 text-right font-normal">Nợ đầu năm</th>
-                          <th className="py-2 px-4 text-right font-normal">Thanh toán</th>
+                          <th className="py-2 px-4 text-right font-normal">Vay thêm</th>
+                          <th className="py-2 px-4 text-right font-normal">Lãi vay</th>
+                          <th className="py-2 px-4 text-right font-normal">Trả gốc</th>
                           <th className="py-2 px-4 text-right font-normal">Nợ cuối năm</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/40">
-                        {debtRows.map((row, i, arr) => {
-                          const prev = arr[i - 1];
-                          const debtStart = prev?.debt ?? null;
-                          const payment = debtStart != null ? Math.max(0, debtStart - row.debt) : null;
+                        {debtRows.map((row) => {
+                          const interest = freeCashRows.find((item) => item.year === row.year)?.totalInterest ?? 0;
                           const isCurrentYear = row.year === new Date().getFullYear();
                           return (
                             <tr key={row.year} className={isCurrentYear ? "bg-primary/5" : ""}>
@@ -978,13 +1054,19 @@ export default function AssetForecastPage() {
                                 {row.year}{isCurrentYear && <span className="ml-1.5 text-[9px] text-primary/70 uppercase tracking-wider">hiện tại</span>}
                               </td>
                               <td className="py-2.5 px-4 text-right tabular-nums text-muted-foreground">
-                                {debtStart != null ? formatVNDFull(debtStart) : "—"}
+                                {formatVNDFull(row.openingDebt)}
                               </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${payment && payment > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
-                                {payment != null && payment > 0 ? formatVNDFull(payment) : "—"}
+                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.drawdown > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
+                                {row.drawdown > 0 ? formatVNDFull(row.drawdown) : "—"}
                               </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-semibold ${row.debt > 0 ? "text-amber-400" : "text-emerald-400"}`}>
-                                {row.debt > 0 ? formatVNDFull(row.debt) : "Đã trả hết"}
+                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${interest > 0 ? "text-red-300" : "text-muted-foreground"}`}>
+                                {interest > 0 ? formatVNDFull(interest) : "—"}
+                              </td>
+                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.principalPayment > 0 ? "text-red-300" : "text-muted-foreground"}`}>
+                                {row.principalPayment > 0 ? formatVNDFull(row.principalPayment) : "—"}
+                              </td>
+                              <td className={`py-2.5 px-4 text-right tabular-nums font-semibold ${row.endingDebt > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+                                {row.endingDebt > 0 ? formatVNDFull(row.endingDebt) : "Đã trả hết"}
                               </td>
                             </tr>
                           );
