@@ -1386,7 +1386,6 @@ export default function AssetForecastPage() {
                       </thead>
                       <tbody className="divide-y divide-border/40">
                         {debtRows.map((row) => {
-                          const interest = freeCashRows.find((item) => item.year === row.year)?.totalInterest ?? 0;
                           const isCurrentYear = row.year === new Date().getFullYear();
                           return (
                             <tr key={row.year} className={isCurrentYear ? "bg-primary/5" : ""}>
@@ -1399,8 +1398,8 @@ export default function AssetForecastPage() {
                               <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.drawdown > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
                                 {row.drawdown > 0 ? formatVNDFull(row.drawdown) : "—"}
                               </td>
-                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${interest > 0 ? "text-red-300" : "text-muted-foreground"}`}>
-                                {interest > 0 ? formatVNDFull(interest) : "—"}
+                              <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.interest > 0 ? "text-red-300" : "text-muted-foreground"}`}>
+                                {row.interest > 0 ? formatVNDFull(row.interest) : "—"}
                               </td>
                               <td className={`py-2.5 px-4 text-right tabular-nums font-medium ${row.principalPayment > 0 ? "text-red-300" : "text-muted-foreground"}`}>
                                 {row.principalPayment > 0 ? formatVNDFull(row.principalPayment) : "—"}
