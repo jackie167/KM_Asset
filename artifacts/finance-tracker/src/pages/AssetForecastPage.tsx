@@ -7,58 +7,19 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum, fetchTotalAssetRows, type TotalAssetRow } from "@/lib/excel-sheets";
-import { CURRENT_ASSET_SHEET, parseCurrentAssetRows } from "@/pages/wealthAllocationData";
+import { CASHFLOW_SOURCE_SHEET, fetchTotalAssetRows, type TotalAssetRow } from "@/lib/excel-sheets";
+import { CURRENT_ASSET_SHEET } from "@/pages/wealthAllocationData";
+import {
+  FORECAST_YEARS, INITIAL_2026_FREE_CASH, INVEST_TYPES, type InvestType,
+  DEFAULT_RATES, TYPE_LABELS, DEFAULT_ALLOCATION_RATIOS,
+  isInvestType, getInvestmentType, isUnallocatedFreeCash,
+  assetReturnKey, fixedTradeKey,
+  type ForecastTrade, type FreeCashRow,
+  DB_KEYS, readJsonRecord, loadDbSetting, saveDbSetting,
+  fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
+  parsePercentInput,
+} from "@/lib/asset-forecast";
 import type { HoldingItem } from "@/pages/assets/types";
-
-const FORECAST_YEARS = Array.from({ length: 2044 - 2026 + 1 }, (_, index) => 2026 + index);
-const INITIAL_2026_FREE_CASH = 7_370_845_000;
-const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto"] as const;
-type InvestType = typeof INVEST_TYPES[number];
-
-const DEFAULT_RATES: Record<InvestType, number> = { cash: 4, stock: 15, gold: 8, fund: 9, crypto: 15 };
-const TYPE_LABELS: Record<InvestType, string> = { cash: "Cash", stock: "Stock", gold: "Gold", fund: "Fund", crypto: "Crypto" };
-const DEFAULT_ALLOCATION_RATIOS: Record<InvestType, number> = { cash: 10, gold: 30, fund: 10, crypto: 10, stock: 40 };
-const SYMBOL_TYPE_MAP: Record<string, InvestType> = { cash: "cash", stock: "stock", gold: "gold", fund: "fund", crypto: "crypto" };
-
-function isInvestType(value: string): value is InvestType {
-  return INVEST_TYPES.includes(value as InvestType);
-}
-
-function getInvestmentType(holding: HoldingItem): InvestType | null {
-  const type = holding.type.toLowerCase();
-  if (isInvestType(type)) return type;
-  return SYMBOL_TYPE_MAP[holding.symbol.toLowerCase()] ?? null;
-}
-
-function isUnallocatedFreeCash(holding: HoldingItem) {
-  const normalizedSymbol = holding.symbol.trim().toLowerCase().replace(/[\s_-]+/g, "");
-  return getInvestmentType(holding) === "cash" || normalizedSymbol === "freecash";
-}
-
-type FreeCashRow = {
-  year: number;
-  income: number;
-  otherIncome: number;
-  expense: number;
-  otherExpense: number;
-  totalInterest: number;
-  totalIncome: number;
-  totalExpense: number;
-  freeCash: number;
-};
-
-type ForecastTrade = {
-  id: number;
-  side: "buy" | "sell";
-  year: number;
-  assetType: string;
-  symbol: string;
-  amount: number;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
 
 type ForecastTradeInput = {
   side: "buy" | "sell";
@@ -69,74 +30,18 @@ type ForecastTradeInput = {
   note?: string | null;
 };
 
+function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {
+  const assetType = trade.assetType.trim().toLowerCase();
+  if (isInvestType(assetType)) return assetType;
+  const symbol = trade.symbol.trim().toLowerCase();
+  if (isInvestType(symbol)) return symbol;
+  return INVEST_TYPES.find((type) => TYPE_LABELS[type].toLowerCase() === symbol) ?? null;
+}
+
 const LS = {
   get: (key: string, fallback: string) => localStorage.getItem(key) ?? fallback,
   set: (key: string, value: string) => localStorage.setItem(key, value),
 };
-
-function readJsonRecord(key: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) ?? "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
-  } catch {
-    return {};
-  }
-}
-
-async function loadDbSetting(key: string): Promise<string | null> {
-  try {
-    const res = await fetch(`/api/settings/${encodeURIComponent(key)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return typeof data?.value === "string" ? data.value : null;
-  } catch {
-    return null;
-  }
-}
-
-async function saveDbSetting(key: string, value: string): Promise<void> {
-  await fetch(`/api/settings/${encodeURIComponent(key)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ value }),
-  });
-}
-
-function assetReturnKey(holding: HoldingItem) {
-  return `${holding.type.trim().toLowerCase()}::${holding.symbol.trim().toUpperCase()}`;
-}
-
-function fixedTradeKey(assetType: string, symbol: string) {
-  return `${assetType.trim().toLowerCase()}::${symbol.trim().toUpperCase()}`;
-}
-
-function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {
-  const assetType = trade.assetType.trim().toLowerCase();
-  if (isInvestType(assetType)) return assetType;
-
-  const symbol = trade.symbol.trim().toLowerCase();
-  if (isInvestType(symbol)) return symbol;
-
-  return INVEST_TYPES.find((type) => TYPE_LABELS[type].toLowerCase() === symbol) ?? null;
-}
-
-async function fetchCurrentAssetData(): Promise<HoldingItem[]> {
-  try {
-    const res = await fetch(`/api/excel/sheet?name=${encodeURIComponent(CURRENT_ASSET_SHEET)}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    const rows = Array.isArray(data?.rows) ? data.rows : [];
-    return parseCurrentAssetRows(rows);
-  } catch {
-    return [];
-  }
-}
-
-async function fetchForecastTrades(): Promise<ForecastTrade[]> {
-  const res = await fetch("/api/asset-forecast/trades");
-  if (!res.ok) throw new Error("Không đọc được forecast trades.");
-  return res.json();
-}
 
 async function createForecastTrade(input: ForecastTradeInput): Promise<ForecastTrade> {
   const res = await fetch("/api/asset-forecast/trades", {
@@ -163,59 +68,6 @@ async function deleteForecastTrade(id: number): Promise<void> {
   if (!res.ok) throw new Error("Không xóa được forecast trade.");
 }
 
-async function fetchFreeCashRows(): Promise<FreeCashRow[]> {
-  try {
-    const res = await fetch(`/api/excel/sheet?name=${encodeURIComponent(CASHFLOW_SOURCE_SHEET)}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    const rows: unknown[][] = data?.rows ?? [];
-    if (rows.length < 2) return [];
-
-    const headers = rows[0];
-    const yearCol = findColIdx(headers, ["year", "năm"]);
-    const incomeCol = findColIdx(headers, ["income", "thu nhập", "thu nhap"]);
-    const otherIncomeCol = findColIdx(headers, ["other income", "thu nhập khác", "thu nhap khac"]);
-    const expenseCol = findColIdx(headers, ["expense", "tiêu dùng", "tieu dung", "tiêu dụng"]);
-    const otherExpenseCol = findColIdx(headers, ["other expense", "chi phí khác", "chi phi khac"]);
-    const interestCol = findColIdx(headers, ["total interest", "interest", "lãi vay", "lai vay"]);
-    if (yearCol < 0 || incomeCol < 0) return [];
-
-    return rows.slice(1).flatMap((row) => {
-      const year = Number(row[yearCol]);
-      if (!FORECAST_YEARS.includes(year)) return [];
-
-      const income = parseNum(row[incomeCol]);
-      const otherIncome = otherIncomeCol >= 0 ? parseNum(row[otherIncomeCol]) : 0;
-      const expense = Math.abs(expenseCol >= 0 ? parseNum(row[expenseCol]) : 0);
-      const otherExpense = Math.abs(otherExpenseCol >= 0 ? parseNum(row[otherExpenseCol]) : 0);
-      const totalInterest = Math.abs(interestCol >= 0 ? parseNum(row[interestCol]) : 0);
-      const totalIncome = income + otherIncome;
-      const totalExpense = expense + otherExpense + totalInterest;
-
-      return [{
-        year,
-        income,
-        otherIncome,
-        expense,
-        otherExpense,
-        totalInterest,
-        totalIncome,
-        totalExpense,
-        freeCash: totalIncome - totalExpense,
-      }];
-    });
-  } catch {
-    return [];
-  }
-}
-
-function parsePercentInput(value: string): number {
-  const cleaned = value.trim().replace(/[^\d,.-]/g, "");
-  const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
-  const parsed = Number.parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function parseAmountInput(value: string): number {
   const cleaned = value.trim().replace(/[^\d,.-]/g, "");
   const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
@@ -226,12 +78,6 @@ function parseAmountInput(value: string): number {
 function formatPercentValue(value: number) {
   return `${value.toFixed(2)}%`;
 }
-
-const DB_KEYS = {
-  assetReturns: "asset_forecast_asset_returns",
-  allocationRatios: "asset_forecast_allocation_ratios",
-  investmentReturns: "asset_forecast_investment_returns",
-} as const;
 
 export default function AssetForecastPage() {
   const queryClient = useQueryClient();

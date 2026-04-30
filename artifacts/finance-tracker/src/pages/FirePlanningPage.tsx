@@ -6,6 +6,12 @@ import type { HoldingItem } from "@/pages/assets/types";
 import { formatVNDFull } from "@/pages/assets/utils";
 import { CASHFLOW_SOURCE_SHEET, fetchCashflowData, fetchTotalAssetData } from "@/lib/excel-sheets";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
+import {
+  INVEST_TYPES, DEFAULT_RATES, DEFAULT_ALLOCATION_RATIOS,
+  DB_KEYS, readJsonRecord, parsePercentInput,
+  fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
+  computeForecastTotals,
+} from "@/lib/asset-forecast";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -139,6 +145,10 @@ export default function FirePlanningPage() {
   const cashflowQuery = useQuery({ queryKey: ["excel-function-cashflow"], queryFn: fetchCashflowData });
   const totalAssetQuery = useQuery({ queryKey: ["excel-total-asset"], queryFn: fetchTotalAssetData });
   const wealthQuery = useQuery({ queryKey: ["wealth-allocation-holdings"], queryFn: fetchWealthAllocationHoldings });
+  // Forecast data — same query keys as AssetForecastPage so cache is shared
+  const forecastAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
+  const forecastCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
+  const forecastTradesQuery = useQuery({ queryKey: ["asset-forecast-trades"], queryFn: fetchForecastTrades });
 
   const isLoading = investQuery.isLoading || cashflowQuery.isLoading;
 
@@ -182,13 +192,46 @@ export default function FirePlanningPage() {
   const monthlyPassiveIncome = annualPassiveIncome / 12;
   const monthlySpend = annualSpend / 12;
 
-  // Time to FIRE
-  const yearsLeft = useMemo(() => {
-    if (!fireNumber || fireNumber <= 0) return null;
-    return yearsToFire(fireAssets, annualSavings, r, fireNumber);
-  }, [fireAssets, annualSavings, r, fireNumber]);
+  // Time to FIRE — derived from forecast table (same data as AssetForecastPage)
+  const forecastTotals = useMemo(() => {
+    const currentAssetRows = forecastAssetQuery.data ?? [];
+    const freeCashRows = forecastCashQuery.data ?? [];
+    const forecastTrades = forecastTradesQuery.data ?? [];
+    if (!currentAssetRows.length && !freeCashRows.length) return null;
 
-  const fireYear = yearsLeft != null ? new Date().getFullYear() + Math.ceil(yearsLeft) : null;
+    const allocationRecord = readJsonRecord(DB_KEYS.allocationRatios);
+    const investReturnRecord = readJsonRecord(DB_KEYS.investmentReturns);
+    const assetReturnRecord = readJsonRecord(DB_KEYS.assetReturns);
+
+    const allocationRatios = INVEST_TYPES.reduce<Record<string, number>>((acc, t) => {
+      acc[t] = parsePercentInput(allocationRecord[t] ?? String(DEFAULT_ALLOCATION_RATIOS[t])) / 100;
+      return acc;
+    }, {}) as Record<typeof INVEST_TYPES[number], number>;
+
+    const investmentReturnRates = INVEST_TYPES.reduce<Record<string, number>>((acc, t) => {
+      acc[t] = parsePercentInput(investReturnRecord[t] ?? String(DEFAULT_RATES[t])) / 100;
+      return acc;
+    }, {}) as Record<typeof INVEST_TYPES[number], number>;
+
+    const assetReturnRates = Object.fromEntries(
+      Object.entries(assetReturnRecord).map(([k, v]) => [k, parsePercentInput(v) / 100])
+    );
+
+    return computeForecastTotals({ currentAssetRows, freeCashRows, forecastTrades, allocationRatios, investmentReturnRates, assetReturnRates });
+  }, [forecastAssetQuery.data, forecastCashQuery.data, forecastTradesQuery.data]);
+
+  const { yearsLeft, fireYear } = useMemo(() => {
+    if (!fireNumber || fireNumber <= 0 || !forecastTotals) {
+      return { yearsLeft: null, fireYear: null };
+    }
+    const crossing = forecastTotals.find((row) => row.totalEnd >= fireNumber);
+    if (!crossing) return { yearsLeft: null, fireYear: null };
+    const currentYear = new Date().getFullYear();
+    return {
+      fireYear: crossing.year,
+      yearsLeft: crossing.year - currentYear,
+    };
+  }, [forecastTotals, fireNumber]);
 
   // Coast FIRE
   const yearsToTarget = Math.max(targetAge - currentAge, 0);
