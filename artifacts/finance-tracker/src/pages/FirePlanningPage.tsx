@@ -110,23 +110,47 @@ function StepInput({ label, value, onChange, step, min, format }: {
   label: string; value: number; onChange: (v: number) => void;
   step: number; min?: number; format: (v: number) => string;
 }) {
-  const dec = () => { const next = value - step; onChange(min != null ? Math.max(min, next) : next); };
-  const inc = () => onChange(value + step);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  const clamp = (v: number) => min != null ? Math.max(min, v) : v;
+
+  const startHold = (delta: number) => {
+    onChange(clamp(value + delta));
+    timerRef.current = setTimeout(() => {
+      intervalRef.current = setInterval(() => {
+        valueRef.current = clamp(valueRef.current + delta);
+        onChange(valueRef.current);
+      }, 80);
+    }, 400);
+  };
+
+  const stopHold = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+  };
+
+  const btnProps = (delta: number) => ({
+    type: "button" as const,
+    onMouseDown: () => startHold(delta),
+    onMouseUp: stopHold,
+    onMouseLeave: stopHold,
+    onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); startHold(delta); },
+    onTouchEnd: stopHold,
+    className: "px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 active:bg-muted/60 transition-colors shrink-0 select-none",
+  });
+
   return (
     <div className="space-y-1">
       <p className="text-[10px] text-muted-foreground uppercase tracking-wider leading-tight">{label}</p>
       <div className="flex items-center rounded border border-border overflow-hidden">
-        <button type="button" onClick={dec}
-          className="px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors shrink-0 select-none">
-          −
-        </button>
+        <button {...btnProps(-step)}>−</button>
         <span className="flex-1 text-center text-sm tabular-nums font-medium py-1.5 px-1 min-w-0 truncate">
           {format(value)}
         </span>
-        <button type="button" onClick={inc}
-          className="px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors shrink-0 select-none">
-          +
-        </button>
+        <button {...btnProps(+step)}>+</button>
       </div>
     </div>
   );
