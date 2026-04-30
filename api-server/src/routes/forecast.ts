@@ -91,6 +91,42 @@ const ForecastLoanEventBody = z.object({
 });
 
 const FINANCIAL_ASSET_KEYS = new Set(["cash", "stock", "gold", "fund", "crypto"]);
+const DEFAULT_FORECAST_LOANS: Array<typeof forecastLoansTable.$inferInsert> = [
+  {
+    assetType: "Real Estate",
+    assetSymbol: "Ariyana",
+    loanName: "Ariyana loan",
+    principalStart: "1285292000",
+    interestRate: "0",
+    startYear: 2026,
+    repaymentType: "interest_only",
+    annualPrincipalPayment: "0",
+    annualInterestPayment: "0",
+    settleOnAssetSell: true,
+    status: "active",
+    note: "Forecast seed. Interest is already represented in Function.total interest; principal schedule is not connected yet.",
+  },
+  {
+    assetType: "Business",
+    assetSymbol: "Shop Mẹ & Bé",
+    loanName: "Shop Mẹ & Bé loan",
+    principalStart: "347488000",
+    interestRate: "0",
+    startYear: 2026,
+    repaymentType: "interest_only",
+    annualPrincipalPayment: "0",
+    annualInterestPayment: "0",
+    settleOnAssetSell: true,
+    status: "active",
+    note: "Forecast seed. Interest is already represented in Function.total interest; principal schedule is not connected yet.",
+  },
+];
+
+async function ensureDefaultForecastLoans() {
+  const existing = await db.select({ id: forecastLoansTable.id }).from(forecastLoansTable).limit(1);
+  if (existing.length > 0) return;
+  await db.insert(forecastLoansTable).values(DEFAULT_FORECAST_LOANS).onConflictDoNothing();
+}
 
 function isFinancialForecastAsset(assetType: string, symbol: string) {
   return FINANCIAL_ASSET_KEYS.has(assetType.trim().toLowerCase()) ||
@@ -114,6 +150,7 @@ router.get("/asset-forecast/trades", async (_req, res): Promise<void> => {
 });
 
 router.get("/asset-forecast/loans", async (_req, res): Promise<void> => {
+  await ensureDefaultForecastLoans();
   const rows = await db
     .select()
     .from(forecastLoansTable)
