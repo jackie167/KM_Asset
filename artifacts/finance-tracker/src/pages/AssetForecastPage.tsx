@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import PageHeader from "@/pages/PageHeader";
@@ -81,6 +81,25 @@ function readJsonRecord(key: string): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+async function loadDbSetting(key: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/settings/${encodeURIComponent(key)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data?.value === "string" ? data.value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveDbSetting(key: string, value: string): Promise<void> {
+  await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
 }
 
 function assetReturnKey(holding: HoldingItem) {
@@ -208,17 +227,17 @@ function formatPercentValue(value: number) {
   return `${value.toFixed(2)}%`;
 }
 
+const DB_KEYS = {
+  assetReturns: "asset_forecast_asset_returns",
+  allocationRatios: "asset_forecast_allocation_ratios",
+  investmentReturns: "asset_forecast_investment_returns",
+} as const;
+
 export default function AssetForecastPage() {
   const queryClient = useQueryClient();
   const returnRateInput = LS.get("asset_forecast_return_rate", "8");
   const [assetReturnInputs, setAssetReturnInputs] = useState(() => readJsonRecord("asset_forecast_asset_returns"));
   const [allocationInputs, setAllocationInputs] = useState(() => readJsonRecord("asset_forecast_allocation_ratios"));
-  const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
-  const [editingTrade, setEditingTrade] = useState<ForecastTrade | null>(null);
-  const [tradeYear, setTradeYear] = useState("2026");
-  const [tradeAssetKey, setTradeAssetKey] = useState("");
-  const [tradeAmount, setTradeAmount] = useState("");
-  const [tradeNote, setTradeNote] = useState("");
   const [investmentReturnInputs, setInvestmentReturnInputs] = useState<Record<string, string>>(() => {
     const stored = readJsonRecord("asset_forecast_investment_returns");
     return INVEST_TYPES.reduce<Record<string, string>>((acc, type) => {
@@ -226,6 +245,44 @@ export default function AssetForecastPage() {
       return acc;
     }, {});
   });
+  const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
+  const [editingTrade, setEditingTrade] = useState<ForecastTrade | null>(null);
+  const [tradeYear, setTradeYear] = useState("2026");
+  const [tradeAssetKey, setTradeAssetKey] = useState("");
+  const [tradeAmount, setTradeAmount] = useState("");
+  const [tradeNote, setTradeNote] = useState("");
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const debounceSaveDb = useCallback((key: string, value: string, delay = 1500) => {
+    clearTimeout(saveTimers.current[key]);
+    saveTimers.current[key] = setTimeout(() => { void saveDbSetting(key, value); }, delay);
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const [assetReturns, allocationRatios, investmentReturns] = await Promise.all([
+        loadDbSetting(DB_KEYS.assetReturns),
+        loadDbSetting(DB_KEYS.allocationRatios),
+        loadDbSetting(DB_KEYS.investmentReturns),
+      ]);
+      if (assetReturns) {
+        LS.set(DB_KEYS.assetReturns, assetReturns);
+        try { setAssetReturnInputs(JSON.parse(assetReturns)); } catch { /* ignore */ }
+      }
+      if (allocationRatios) {
+        LS.set(DB_KEYS.allocationRatios, allocationRatios);
+        try { setAllocationInputs(JSON.parse(allocationRatios)); } catch { /* ignore */ }
+      }
+      if (investmentReturns) {
+        LS.set(DB_KEYS.investmentReturns, investmentReturns);
+        try {
+          const parsed = JSON.parse(investmentReturns) as Record<string, string>;
+          setInvestmentReturnInputs((prev) => ({ ...prev, ...parsed }));
+        } catch { /* ignore */ }
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const freeCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
@@ -450,7 +507,9 @@ export default function AssetForecastPage() {
   const saveAllocationInput = (type: InvestType, value: string) => {
     setAllocationInputs((current) => {
       const next = { ...current, [type]: value };
-      LS.set("asset_forecast_allocation_ratios", JSON.stringify(next));
+      const json = JSON.stringify(next);
+      LS.set(DB_KEYS.allocationRatios, json);
+      debounceSaveDb(DB_KEYS.allocationRatios, json);
       return next;
     });
   };
@@ -458,7 +517,9 @@ export default function AssetForecastPage() {
   const saveInvestmentReturnInput = (type: InvestType, value: string) => {
     setInvestmentReturnInputs((current) => {
       const next = { ...current, [type]: value };
-      LS.set("asset_forecast_investment_returns", JSON.stringify(next));
+      const json = JSON.stringify(next);
+      LS.set(DB_KEYS.investmentReturns, json);
+      debounceSaveDb(DB_KEYS.investmentReturns, json);
       return next;
     });
   };
@@ -467,7 +528,9 @@ export default function AssetForecastPage() {
     const key = assetReturnKey(holding);
     setAssetReturnInputs((current) => {
       const next = { ...current, [key]: value };
-      LS.set("asset_forecast_asset_returns", JSON.stringify(next));
+      const json = JSON.stringify(next);
+      LS.set(DB_KEYS.assetReturns, json);
+      debounceSaveDb(DB_KEYS.assetReturns, json);
       return next;
     });
   };
