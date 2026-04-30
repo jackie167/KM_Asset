@@ -327,7 +327,7 @@ export default function FinancialDashboardPage() {
         }]}
       />
 
-      <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
+      <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
 
         {/* ── Tổng quan ─────────────────────────────────────────────────── */}
         <section className="space-y-2">

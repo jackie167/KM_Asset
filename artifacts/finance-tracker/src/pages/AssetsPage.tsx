@@ -568,7 +568,7 @@ export default function AssetsPage() {
         }}
       />
 
-      <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
+      <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
         {isError ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">
             {error instanceof Error ? error.message : "Unable to load data."}

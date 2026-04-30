@@ -419,7 +419,7 @@ export default function TransactionsPage() {
         actions={menuActions}
       />
 
-      <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
+      <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
         <Card className="p-4 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>

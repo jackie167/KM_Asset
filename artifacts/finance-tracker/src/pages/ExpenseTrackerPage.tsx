@@ -243,7 +243,7 @@ export default function ExpenseTrackerPage() {
         }]}
       />
 
-      <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
+      <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
 
         {/* ── Phân bổ + Want Budget (side by side on landscape) ───────────── */}
         <div className="grid md:grid-cols-2 gap-6 items-start">

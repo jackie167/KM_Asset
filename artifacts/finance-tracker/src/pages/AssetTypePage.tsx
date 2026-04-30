@@ -158,7 +158,7 @@ export default function AssetTypePage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border px-3 sm:px-4 md:px-6 py-3 sticky top-0 bg-background/95 backdrop-blur z-10">
-        <div className="max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto space-y-3">
+        <div className="md:max-w-5xl xl:max-w-7xl mx-auto space-y-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
               <h1 className="text-lg sm:text-xl font-semibold tracking-tight">{typeLabel}</h1>
@@ -202,7 +202,7 @@ export default function AssetTypePage() {
         </div>
       </header>
 
-      <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
+      <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
         {isError ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">
             {error instanceof Error ? error.message : "Unable to load data."}

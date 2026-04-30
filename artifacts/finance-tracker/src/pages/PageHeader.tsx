@@ -37,7 +37,7 @@ type PageHeaderProps = {
 export default function PageHeader({ title, subtitle, inlineRight, actions = [] }: PageHeaderProps) {
   return (
     <header className="border-b border-border px-3 sm:px-4 md:px-6 py-3 sticky top-0 bg-background/95 backdrop-blur z-10">
-      <div className="max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto flex items-start justify-between gap-3">
+      <div className="md:max-w-5xl xl:max-w-7xl mx-auto flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-lg sm:text-xl font-semibold tracking-[0.18em] uppercase">{title}</h1>
           {subtitle && (

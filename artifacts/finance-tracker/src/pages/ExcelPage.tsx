@@ -157,7 +157,7 @@ export default function ExcelPage() {
     <div className="min-h-screen bg-background text-foreground">
       <PageHeader title="Excel Sheets" />
 
-      <main className="w-full max-w-screen-sm md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
+      <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-4 space-y-4">
         <Card className="p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
