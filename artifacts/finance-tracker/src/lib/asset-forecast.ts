@@ -179,20 +179,11 @@ export function computeForecastTotals({
   // --- trade maps ---
   const tradeCashByYear = new Map<number, number>();
   const fixedSellByYearKey = new Map<string, number>();
-  const investSellByYearType = new Map<string, number>();
   for (const trade of forecastTrades) {
-    const signed = trade.side === "sell" ? trade.amount : -trade.amount;
-    tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) + signed);
-    if (trade.side === "sell") {
-      const type = getTradeInvestmentType(trade);
-      if (type) {
-        const k = `${trade.year}::${type}`;
-        investSellByYearType.set(k, (investSellByYearType.get(k) ?? 0) + trade.amount);
-      } else {
-        const k = `${trade.year}::${fixedTradeKey(trade.assetType, trade.symbol)}`;
-        fixedSellByYearKey.set(k, (fixedSellByYearKey.get(k) ?? 0) + trade.amount);
-      }
-    }
+    if (trade.side !== "sell" || getTradeInvestmentType(trade)) continue;
+    tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) + trade.amount);
+    const k = `${trade.year}::${fixedTradeKey(trade.assetType, trade.symbol)}`;
+    fixedSellByYearKey.set(k, (fixedSellByYearKey.get(k) ?? 0) + trade.amount);
   }
 
   // --- allocation rows ---
@@ -213,9 +204,7 @@ export function computeForecastTotals({
     for (const type of INVEST_TYPES) {
       const startValue = investmentValues[type] ?? 0;
       const allocationValue = freeCash * (allocationRatios[type] ?? 0);
-      const sellAmount = investSellByYearType.get(`${forecastYear}::${type}`) ?? 0;
-      const effectiveSell = Math.min(Math.max(0, startValue + allocationValue), sellAmount);
-      const valueBeforeReturn = Math.max(0, startValue + allocationValue - effectiveSell);
+      const valueBeforeReturn = startValue + allocationValue;
       const endValue = valueBeforeReturn * (1 + (investmentReturnRates[type] ?? 0));
       investmentValues[type] = endValue;
       investmentEnd += endValue;

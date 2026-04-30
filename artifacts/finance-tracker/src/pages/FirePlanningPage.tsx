@@ -110,46 +110,11 @@ function StepInput({ label, value, onChange, step, min, format }: {
   label: string; value: number; onChange: (v: number) => void;
   step: number; min?: number; format: (v: number) => string;
 }) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const wasRepeatingRef = useRef(false);
-  const valueRef = useRef(value);
-  valueRef.current = value;
-
   const clamp = (v: number) => min != null ? Math.max(min, v) : v;
-
-  const startPress = (delta: number) => {
-    wasRepeatingRef.current = false;
-    timerRef.current = setTimeout(() => {
-      wasRepeatingRef.current = true;
-      intervalRef.current = setInterval(() => {
-        valueRef.current = clamp(valueRef.current + delta);
-        onChange(valueRef.current);
-      }, 80);
-    }, 2000);
-  };
-
-  const clearPress = () => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-  };
-
-  // Single tap: fires after mouseup (click) — skip if auto-repeat already ran
-  const handleTap = (delta: number) => {
-    clearPress();
-    if (!wasRepeatingRef.current) {
-      onChange(clamp(valueRef.current + delta));
-    }
-    wasRepeatingRef.current = false;
-  };
 
   const btnProps = (delta: number) => ({
     type: "button" as const,
-    onMouseDown: () => startPress(delta),
-    onMouseUp: () => handleTap(delta),
-    onMouseLeave: () => { clearPress(); wasRepeatingRef.current = false; },
-    onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); startPress(delta); },
-    onTouchEnd: (e: React.TouchEvent) => { e.preventDefault(); handleTap(delta); },
+    onClick: () => onChange(clamp(value + delta)),
     className: "px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/40 active:bg-muted/60 transition-colors shrink-0 select-none",
   });
 
@@ -208,7 +173,6 @@ export default function FirePlanningPage() {
         setFireAssetMode(assetMode);
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Queries

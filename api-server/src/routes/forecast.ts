@@ -20,13 +20,27 @@ function serializeForecastTrade(row: typeof forecastTradesTable.$inferSelect) {
 }
 
 const ForecastTradeBody = z.object({
-  side: z.enum(["buy", "sell"]),
+  side: z.literal("sell"),
   year: z.number().int().min(2026).max(2044),
   assetType: z.string().trim().min(1),
   symbol: z.string().trim().min(1),
   amount: z.number().positive(),
   note: z.string().trim().max(500).optional().nullable(),
 });
+
+const FINANCIAL_ASSET_KEYS = new Set(["cash", "stock", "gold", "fund", "crypto"]);
+
+function isFinancialForecastAsset(assetType: string, symbol: string) {
+  return FINANCIAL_ASSET_KEYS.has(assetType.trim().toLowerCase()) ||
+    FINANCIAL_ASSET_KEYS.has(symbol.trim().toLowerCase());
+}
+
+function validateFixedAssetTrade(input: z.infer<typeof ForecastTradeBody>) {
+  if (isFinancialForecastAsset(input.assetType, input.symbol)) {
+    return "Forecast trade chỉ cho phép bán fixed asset, không bán financial asset.";
+  }
+  return null;
+}
 
 router.get("/asset-forecast/trades", async (_req, res): Promise<void> => {
   const rows = await db
@@ -41,6 +55,11 @@ router.post("/asset-forecast/trades", async (req, res): Promise<void> => {
   const parsed = ForecastTradeBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const businessError = validateFixedAssetTrade(parsed.data);
+  if (businessError) {
+    res.status(400).json({ error: businessError });
     return;
   }
 
@@ -65,6 +84,8 @@ router.put("/asset-forecast/trades/:id", async (req, res): Promise<void> => {
 
   const parsed = ForecastTradeBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const businessError = validateFixedAssetTrade(parsed.data);
+  if (businessError) { res.status(400).json({ error: businessError }); return; }
 
   const [row] = await db
     .update(forecastTradesTable)

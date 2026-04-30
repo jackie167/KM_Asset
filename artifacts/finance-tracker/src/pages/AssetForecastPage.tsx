@@ -14,7 +14,7 @@ import {
   DEFAULT_RATES, TYPE_LABELS, DEFAULT_ALLOCATION_RATIOS,
   isInvestType, getInvestmentType, isUnallocatedFreeCash,
   assetReturnKey, fixedTradeKey,
-  type ForecastTrade, type FreeCashRow,
+  type ForecastTrade,
   DB_KEYS, readJsonRecord, loadDbSetting, saveDbSetting,
   fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
   parsePercentInput,
@@ -22,7 +22,7 @@ import {
 import type { HoldingItem } from "@/pages/assets/types";
 
 type ForecastTradeInput = {
-  side: "buy" | "sell";
+  side: "sell";
   year: number;
   assetType: string;
   symbol: string;
@@ -127,7 +127,6 @@ export default function AssetForecastPage() {
         } catch { /* ignore */ }
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
@@ -197,8 +196,8 @@ export default function AssetForecastPage() {
   const tradeCashByYear = useMemo(() => {
     const result = new Map<number, number>();
     for (const trade of forecastTrades) {
-      const signedAmount = trade.side === "sell" ? trade.amount : -trade.amount;
-      result.set(trade.year, (result.get(trade.year) ?? 0) + signedAmount);
+      if (trade.side !== "sell" || getTradeInvestmentType(trade)) continue;
+      result.set(trade.year, (result.get(trade.year) ?? 0) + trade.amount);
     }
     return result;
   }, [forecastTrades]);
@@ -208,18 +207,6 @@ export default function AssetForecastPage() {
     for (const trade of forecastTrades) {
       if (trade.side !== "sell" || getTradeInvestmentType(trade)) continue;
       const key = `${trade.year}::${fixedTradeKey(trade.assetType, trade.symbol)}`;
-      result.set(key, (result.get(key) ?? 0) + trade.amount);
-    }
-    return result;
-  }, [forecastTrades]);
-
-  const investmentSellByYearAndType = useMemo(() => {
-    const result = new Map<string, number>();
-    for (const trade of forecastTrades) {
-      if (trade.side !== "sell") continue;
-      const type = getTradeInvestmentType(trade);
-      if (!type) continue;
-      const key = `${trade.year}::${type}`;
       result.set(key, (result.get(key) ?? 0) + trade.amount);
     }
     return result;
@@ -261,14 +248,12 @@ export default function AssetForecastPage() {
       const investmentDetails = INVEST_TYPES.map((type) => {
         const startValue = investmentValues[type] ?? 0;
         const allocationValue = allocation?.byType[type] ?? 0;
-        const sellAmount = investmentSellByYearAndType.get(`${forecastYear}::${type}`) ?? 0;
-        const effectiveSell = Math.min(Math.max(0, startValue + allocationValue), sellAmount);
-        const valueBeforeReturn = Math.max(0, startValue + allocationValue - effectiveSell);
+        const valueBeforeReturn = startValue + allocationValue;
         const returnRate = investmentStartRows.find((row) => row.type === type)?.returnRate ?? 0;
         const gain = valueBeforeReturn * returnRate;
         const endValue = valueBeforeReturn + gain;
         investmentValues[type] = endValue;
-        return { type, label: TYPE_LABELS[type], startValue, allocationValue, sellAmount: effectiveSell, valueBeforeReturn, returnRate, gain, endValue };
+        return { type, label: TYPE_LABELS[type], startValue, allocationValue, valueBeforeReturn, returnRate, gain, endValue };
       });
 
       const fixedDetails = fixedValues.map((row) => {
@@ -311,7 +296,7 @@ export default function AssetForecastPage() {
         totalIncrease: totalEnd - totalStart,
       };
     });
-  }, [allocationRows, baseFreeCashByYear, fixedAssetRows, fixedSellByYearAndKey, investmentSellByYearAndType, investmentStartRows, tradeCashByYear]);
+  }, [allocationRows, baseFreeCashByYear, fixedAssetRows, fixedSellByYearAndKey, investmentStartRows, tradeCashByYear]);
 
   const firstForecast = forecastRows[0];
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
