@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import PageHeader from "@/pages/PageHeader";
@@ -10,8 +10,17 @@ import {
   INVEST_TYPES, DEFAULT_RATES, DEFAULT_ALLOCATION_RATIOS,
   DB_KEYS, readJsonRecord, parsePercentInput,
   fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
-  computeForecastTotals,
+  computeForecastTotals, loadDbSetting, saveDbSetting,
 } from "@/lib/asset-forecast";
+
+const FIRE_DB_KEYS = {
+  wr:        "fire_wr",
+  ret:       "fire_ret",
+  age:       "fire_age",
+  targetAge: "fire_target_age",
+  spend:     "fire_spend",
+  assetMode: "fire_asset_mode",
+} as const;
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -137,7 +146,29 @@ export default function FirePlanningPage() {
     localStorage.getItem("fire_asset_mode") === "networth" ? "networth" : "investment"
   );
 
-  const save = (k: string, v: number) => { LS.set(k, v); };
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const debounceSaveDb = (key: string, value: string, delay = 1500) => {
+    clearTimeout(saveTimers.current[key]);
+    saveTimers.current[key] = setTimeout(() => { void saveDbSetting(key, value); }, delay);
+  };
+  const save = (k: string, v: number) => { LS.set(k, v); debounceSaveDb(k, String(v)); };
+
+  useEffect(() => {
+    void (async () => {
+      const vals = await Promise.all(Object.values(FIRE_DB_KEYS).map((k) => loadDbSetting(k)));
+      const [wr, ret, age, targetAge, spend, assetMode] = vals;
+      if (wr)        { LS.set(FIRE_DB_KEYS.wr, Number(wr));        setWithdrawalRate(Number(wr)); }
+      if (ret)       { LS.set(FIRE_DB_KEYS.ret, Number(ret));       setExpectedReturn(Number(ret)); }
+      if (age)       { LS.set(FIRE_DB_KEYS.age, Number(age));       setCurrentAge(Number(age)); }
+      if (targetAge) { LS.set(FIRE_DB_KEYS.targetAge, Number(targetAge)); setTargetAge(Number(targetAge)); }
+      if (spend)     { LS.set(FIRE_DB_KEYS.spend, Number(spend));   setCustomSpend(Number(spend)); }
+      if (assetMode === "networth" || assetMode === "investment") {
+        localStorage.setItem("fire_asset_mode", assetMode);
+        setFireAssetMode(assetMode);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Queries
   const investQuery = useQuery({ queryKey: ["dashboard-investment"], queryFn: fetchInvestmentSummary });
@@ -329,7 +360,7 @@ export default function FirePlanningPage() {
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => { setFireAssetMode(mode); localStorage.setItem("fire_asset_mode", mode); }}
+                    onClick={() => { setFireAssetMode(mode); localStorage.setItem("fire_asset_mode", mode); debounceSaveDb(FIRE_DB_KEYS.assetMode, mode); }}
                     className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${fireAssetMode === mode ? "bg-primary/10 border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
                   >
                     {mode === "investment" ? "Investment" : "Net worth"}
