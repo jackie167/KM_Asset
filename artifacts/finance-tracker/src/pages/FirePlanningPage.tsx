@@ -4,8 +4,9 @@ import { Card } from "@/components/ui/card";
 import PageHeader from "@/pages/PageHeader";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, fetchCashflowData, fetchTotalAssetData } from "@/lib/excel-sheets";
+import { CASHFLOW_SOURCE_SHEET, fetchCashflowData } from "@/lib/excel-sheets";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
+import { fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import {
   INVEST_TYPES, DEFAULT_RATES, DEFAULT_ALLOCATION_RATIOS,
   DB_KEYS, readJsonRecord, parsePercentInput,
@@ -179,8 +180,9 @@ export default function FirePlanningPage() {
   const investQuery = useQuery({ queryKey: ["dashboard-investment"], queryFn: fetchInvestmentSummary });
   const xirrQuery = useQuery({ queryKey: ["portfolio-xirr"], queryFn: fetchXirr });
   const cashflowQuery = useQuery({ queryKey: ["excel-function-cashflow"], queryFn: fetchCashflowData });
-  const totalAssetQuery = useQuery({ queryKey: ["excel-total-asset"], queryFn: fetchTotalAssetData });
   const wealthQuery = useQuery({ queryKey: ["wealth-allocation-holdings"], queryFn: fetchWealthAllocationHoldings });
+  const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
+  const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
   // Forecast data — same query keys as AssetForecastPage so cache is shared
   const forecastAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const forecastCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
@@ -214,9 +216,9 @@ export default function FirePlanningPage() {
   const wealthNetAsset = useMemo(() => {
     const holdings = wealthQuery.data ?? [];
     const total = holdings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
-    const debt = totalAssetQuery.data?.debt ?? 0;
+    const debt = getForecastDebtForYear(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? []);
     return total - debt;
-  }, [wealthQuery.data, totalAssetQuery.data]);
+  }, [forecastLoanEventsQuery.data, forecastLoansQuery.data, wealthQuery.data]);
 
   const fireAssets = fireAssetMode === "networth" ? wealthNetAsset : financialAssets;
 

@@ -6,7 +6,8 @@ import PageHeader from "@/pages/PageHeader";
 import { Card } from "@/components/ui/card";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, fetchCashflowData, fetchTotalAssetData } from "@/lib/excel-sheets";
+import { CASHFLOW_SOURCE_SHEET, fetchCashflowData } from "@/lib/excel-sheets";
+import { buildForecastLoanSchedule, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -242,7 +243,8 @@ export default function FinancialDashboardPage() {
   const transactionsQuery = useQuery({ queryKey: ["transactions"], queryFn: fetchTransactions });
   const portfolioCashFlowsQuery = useQuery({ queryKey: ["portfolio-cash-flows"], queryFn: fetchCashFlows });
   const cashflowQuery = useQuery({ queryKey: ["excel-function-cashflow"], queryFn: fetchCashflowData });
-  const totalAssetQuery = useQuery({ queryKey: ["excel-total-asset"], queryFn: fetchTotalAssetData });
+  const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
+  const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
 
   // ── derived values ─────────────────────────────────────────────────────────
 
@@ -292,6 +294,17 @@ export default function FinancialDashboardPage() {
   }, [cashCostBasis, investmentHoldings, realizedPnLBySymbol]);
   const pnlPct = pctOf(pnl, costTotal);
   const xirrAnnual = xirrQuery.data?.xirrAnnual ?? null;
+  const forecastDebt = useMemo(() => (
+    getForecastDebtForYear(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [])
+  ), [forecastLoanEventsQuery.data, forecastLoansQuery.data]);
+  const forecastLoanInterest = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return buildForecastLoanSchedule(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [])
+      .find((row) => row.year === currentYear)?.interest ?? 0;
+  }, [forecastLoanEventsQuery.data, forecastLoansQuery.data]);
+  const forecastDebtRatio = pctOf(forecastDebt, netWorth);
+  const forecastInterestBurden = cashflowQuery.data?.income ? forecastLoanInterest / cashflowQuery.data.income : null;
+  const debtLoading = forecastLoansQuery.isLoading || forecastLoanEventsQuery.isLoading;
 
   // Group investment by type for health ratios
   const byType = useMemo(() => {
@@ -353,19 +366,19 @@ export default function FinancialDashboardPage() {
               />
               <StatCard
                 label="Nợ"
-                value={fmt(totalAssetQuery.data?.debt ?? null, true)}
-                sub={netWorth > 0 && totalAssetQuery.data?.debt
-                  ? `${formatPercent(totalAssetQuery.data.debt / netWorth)} tổng tài sản`
+                value={fmt(forecastDebt, true)}
+                sub={netWorth > 0 && forecastDebt
+                  ? `${formatPercent(forecastDebt / netWorth)} tổng tài sản`
                   : undefined}
                 tone="negative"
-                loading={totalAssetQuery.isLoading}
+                loading={debtLoading}
               />
               <StatCard
                 label="Tài sản ròng"
-                value={fmt(netWorth > 0 ? netWorth - (totalAssetQuery.data?.debt ?? 0) : null, true)}
+                value={fmt(netWorth > 0 ? netWorth - forecastDebt : null, true)}
                 sub="Sau khi trừ nợ"
                 tone="positive"
-                loading={wealthLoading || totalAssetQuery.isLoading}
+                loading={wealthLoading || debtLoading}
               />
             </div>
 
@@ -515,7 +528,7 @@ export default function FinancialDashboardPage() {
                     { label: "Chi tiêu năm",            value: fmt(cashflowQuery.data.expense, true), t: "neutral" as Tone },
                     { label: "Tiết kiệm ròng",          value: fmt(cashflowQuery.data.income - cashflowQuery.data.expense, true), t: tone(cashflowQuery.data.income - cashflowQuery.data.expense) },
                     { label: "Thu nhập / tháng (ước)",  value: fmt(cashflowQuery.data.income / 12), t: "neutral" as Tone },
-                    { label: "Gánh nặng lãi vay",       value: formatPercent(cashflowQuery.data.interestBurden), t: (cashflowQuery.data.interestBurden ?? 0) < 0.1 ? "positive" as Tone : "warn" as Tone },
+                    { label: "Gánh nặng lãi vay",       value: formatPercent(forecastInterestBurden), t: (forecastInterestBurden ?? 0) < 0.1 ? "positive" as Tone : "warn" as Tone },
                   ].map(row => (
                     <div key={row.label} className="flex items-center justify-between gap-4 border-b border-border/20 py-2 first:pt-0 last:border-0 last:pb-0">
                       <p className="text-xs text-muted-foreground shrink-0">{row.label}</p>
@@ -531,7 +544,7 @@ export default function FinancialDashboardPage() {
             {/* Cột phải — chỉ số tỷ lệ */}
             <div className="space-y-5">
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Chỉ số dòng tiền</p>
-              {cashflowQuery.isLoading || totalAssetQuery.isLoading ? (
+              {cashflowQuery.isLoading || debtLoading ? (
                 <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-10 rounded bg-muted animate-pulse" />)}</div>
               ) : (
                 <div className="space-y-5">
@@ -544,15 +557,15 @@ export default function FinancialDashboardPage() {
                   />
                   <HealthRow
                     label="Gánh nặng lãi vay"
-                    value={formatPercent(cashflowQuery.data?.interestBurden)}
-                    pct={cashflowQuery.data?.interestBurden ?? null}
+                    value={formatPercent(forecastInterestBurden)}
+                    pct={forecastInterestBurden}
                     low={0} high={0.10}
                     hint="Nên dưới 10% thu nhập — an toàn tài chính"
                   />
                   <HealthRow
                     label="Tỷ lệ nợ / tổng tài sản"
-                    value={formatPercent(totalAssetQuery.data?.debtRatio)}
-                    pct={totalAssetQuery.data?.debtRatio ?? null}
+                    value={formatPercent(forecastDebtRatio)}
+                    pct={forecastDebtRatio}
                     low={0} high={0.30}
                     hint="Nên dưới 30% tổng tài sản"
                   />

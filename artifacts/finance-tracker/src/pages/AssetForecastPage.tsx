@@ -19,6 +19,16 @@ import {
   fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
   parsePercentInput,
 } from "@/lib/asset-forecast";
+import {
+  buildForecastLoanSchedule,
+  createForecastLoanEvent,
+  deleteForecastLoanEvent,
+  fetchForecastLoanEvents,
+  fetchForecastLoans,
+  type ForecastLoan,
+  type ForecastLoanEvent,
+  updateForecastLoan,
+} from "@/lib/forecast-loans";
 import type { HoldingItem } from "@/pages/assets/types";
 
 type ForecastTradeInput = {
@@ -29,36 +39,6 @@ type ForecastTradeInput = {
   amount: number;
   note?: string | null;
 };
-
-type ForecastLoan = {
-  id: number;
-  assetType: string;
-  assetSymbol: string;
-  loanName: string;
-  principalStart: number;
-  interestRate: number;
-  startYear: number;
-  endYear: number | null;
-  repaymentType: "interest_only" | "principal_interest" | "bullet" | "custom";
-  annualPrincipalPayment: number;
-  annualInterestPayment: number;
-  settleOnAssetSell: boolean;
-  status: "active" | "settled";
-  note: string | null;
-};
-
-type ForecastLoanEvent = {
-  id: number;
-  loanId: number;
-  year: number;
-  eventType: "drawdown" | "interest" | "principal_payment" | "settlement";
-  amount: number;
-  source: string;
-  tradeId: number | null;
-  note: string | null;
-};
-
-type ForecastLoanEventInput = Omit<ForecastLoanEvent, "id" | "tradeId"> & { tradeId?: number | null };
 
 function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {
   const assetType = trade.assetType.trim().toLowerCase();
@@ -96,43 +76,6 @@ async function updateForecastTrade(id: number, input: ForecastTradeInput): Promi
 async function deleteForecastTrade(id: number): Promise<void> {
   const res = await fetch(`/api/asset-forecast/trades/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Không xóa được forecast trade.");
-}
-
-async function fetchForecastLoans(): Promise<ForecastLoan[]> {
-  const res = await fetch("/api/asset-forecast/loans");
-  if (!res.ok) throw new Error("Không đọc được forecast loans.");
-  return res.json();
-}
-
-async function updateForecastLoan(id: number, input: Partial<ForecastLoan>): Promise<ForecastLoan> {
-  const res = await fetch(`/api/asset-forecast/loans/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error("Không cập nhật được forecast loan.");
-  return res.json();
-}
-
-async function fetchForecastLoanEvents(): Promise<ForecastLoanEvent[]> {
-  const res = await fetch("/api/asset-forecast/loan-events");
-  if (!res.ok) throw new Error("Không đọc được forecast loan events.");
-  return res.json();
-}
-
-async function createForecastLoanEvent(input: ForecastLoanEventInput): Promise<ForecastLoanEvent> {
-  const res = await fetch("/api/asset-forecast/loan-events", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) throw new Error("Không lưu được forecast loan event.");
-  return res.json();
-}
-
-async function deleteForecastLoanEvent(id: number): Promise<void> {
-  const res = await fetch(`/api/asset-forecast/loan-events/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Không xóa được forecast loan event.");
 }
 
 function parseAmountInput(value: string): number {
@@ -296,60 +239,16 @@ export default function AssetForecastPage() {
     return result;
   }, [forecastTrades]);
 
-  const loanScheduleRows = useMemo(() => {
-    const eventsByLoanYear = new Map<string, ForecastLoanEvent[]>();
-    for (const event of forecastLoanEvents) {
-      const key = `${event.loanId}::${event.year}`;
-      eventsByLoanYear.set(key, [...(eventsByLoanYear.get(key) ?? []), event]);
-    }
-
-    const loanState = new Map(forecastLoans.map((loan) => [loan.id, loan.principalStart]));
-
-    return FORECAST_YEARS.map((year) => {
-      let openingDebt = 0;
-      let drawdown = 0;
-      let principalPayment = 0;
-      let settlement = 0;
-      let interest = 0;
-
-      for (const loan of forecastLoans) {
-        const starts = year >= loan.startYear;
-        const ended = loan.endYear != null && year > loan.endYear;
-        const startPrincipal = starts && !ended ? (loanState.get(loan.id) ?? loan.principalStart) : 0;
-        openingDebt += startPrincipal;
-        if (!starts || ended || loan.status === "settled") continue;
-
-        const events = eventsByLoanYear.get(`${loan.id}::${year}`) ?? [];
-        const eventDrawdown = events.filter((event) => event.eventType === "drawdown").reduce((sum, event) => sum + event.amount, 0);
-        const eventPrincipal = events.filter((event) => event.eventType === "principal_payment").reduce((sum, event) => sum + event.amount, 0);
-        const eventSettlement = events.filter((event) => event.eventType === "settlement").reduce((sum, event) => sum + event.amount, 0);
-        const eventInterest = events.filter((event) => event.eventType === "interest").reduce((sum, event) => sum + event.amount, 0);
-        const scheduledPrincipal = loan.repaymentType === "custom" ? 0 : loan.annualPrincipalPayment;
-        const scheduledInterest = loan.annualInterestPayment || startPrincipal * loan.interestRate;
-        const paidPrincipal = Math.min(Math.max(0, startPrincipal + eventDrawdown), scheduledPrincipal + eventPrincipal + eventSettlement);
-        const endingPrincipal = Math.max(0, startPrincipal + eventDrawdown - paidPrincipal);
-
-        drawdown += eventDrawdown;
-        principalPayment += scheduledPrincipal + eventPrincipal;
-        settlement += eventSettlement;
-        interest += scheduledInterest + eventInterest;
-        loanState.set(loan.id, endingPrincipal);
-      }
-
-      return {
-        year,
-        openingDebt,
-        drawdown,
-        interest,
-        principalPayment,
-        settlement,
-        endingDebt: Math.max(0, openingDebt + drawdown - principalPayment - settlement),
-      };
-    });
-  }, [forecastLoanEvents, forecastLoans]);
+  const loanScheduleRows = useMemo(() => (
+    buildForecastLoanSchedule(forecastLoans, forecastLoanEvents)
+  ), [forecastLoanEvents, forecastLoans]);
 
   const debtPrincipalPaymentByYear = useMemo(() => {
-    return new Map(loanScheduleRows.map((row) => [row.year, row.principalPayment]));
+    return new Map(loanScheduleRows.map((row) => [row.year, row.principalPayment + row.settlement]));
+  }, [loanScheduleRows]);
+
+  const debtInterestByYear = useMemo(() => {
+    return new Map(loanScheduleRows.map((row) => [row.year, row.interest]));
   }, [loanScheduleRows]);
 
   const debtEndByYear = useMemo(() => {
@@ -357,15 +256,18 @@ export default function AssetForecastPage() {
   }, [loanScheduleRows]);
 
   const baseFreeCashByYear = useMemo(() => {
-    return new Map(freeCashRows.map((row) => [row.year, row.freeCash]));
+    return new Map(freeCashRows.map((row) => [row.year, row.freeCash + row.totalInterest]));
   }, [freeCashRows]);
 
   const finalFreeCashByYear = useMemo(() => {
     return new Map(FORECAST_YEARS.map((year) => [
       year,
-      (baseFreeCashByYear.get(year) ?? 0) + (tradeCashByYear.get(year) ?? 0),
+      (baseFreeCashByYear.get(year) ?? 0) +
+        (tradeCashByYear.get(year) ?? 0) -
+        (debtInterestByYear.get(year) ?? 0) -
+        (debtPrincipalPaymentByYear.get(year) ?? 0),
     ]));
-  }, [baseFreeCashByYear, tradeCashByYear]);
+  }, [baseFreeCashByYear, debtInterestByYear, debtPrincipalPaymentByYear, tradeCashByYear]);
 
   const allocationRows = useMemo(() => {
     const rows = new Map<number, number>();
@@ -792,6 +694,8 @@ export default function AssetForecastPage() {
                       };
                       const tradeCash = tradeCashByYear.get(year) ?? 0;
                       const principalPayment = debtPrincipalPaymentByYear.get(year) ?? 0;
+                      const loanInterest = debtInterestByYear.get(year) ?? 0;
+                      const totalExpense = row.expense + row.otherExpense + loanInterest;
                       const freeCash = finalFreeCashByYear.get(year) ?? 0;
                       return (
                         <tr key={row.year}>
@@ -800,9 +704,9 @@ export default function AssetForecastPage() {
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.otherIncome)}</td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.expense)}</td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.otherExpense)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.totalInterest)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(loanInterest)}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(row.totalIncome)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(row.totalExpense)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(totalExpense)}</td>
                           <td className={`py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap ${tradeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                             {tradeCash ? formatVNDFull(tradeCash) : "—"}
                           </td>
