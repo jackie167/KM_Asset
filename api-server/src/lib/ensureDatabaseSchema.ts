@@ -99,4 +99,97 @@ export async function ensureDatabaseSchema() {
     CREATE INDEX IF NOT EXISTS forecast_trades_year_idx
       ON forecast_trades (year)
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forecast_loans (
+      id serial PRIMARY KEY,
+      asset_type text NOT NULL,
+      asset_symbol text NOT NULL,
+      loan_name text NOT NULL,
+      principal_start numeric(18, 2) NOT NULL,
+      interest_rate numeric(10, 6) NOT NULL DEFAULT 0,
+      start_year integer NOT NULL,
+      end_year integer,
+      repayment_type text NOT NULL DEFAULT 'interest_only',
+      annual_principal_payment numeric(18, 2) NOT NULL DEFAULT 0,
+      annual_interest_payment numeric(18, 2) NOT NULL DEFAULT 0,
+      settle_on_asset_sell boolean NOT NULL DEFAULT true,
+      status text NOT NULL DEFAULT 'active',
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS forecast_loans_asset_name_start_year_idx
+      ON forecast_loans (asset_symbol, loan_name, start_year)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forecast_loan_events (
+      id serial PRIMARY KEY,
+      loan_id integer NOT NULL REFERENCES forecast_loans(id) ON DELETE CASCADE,
+      year integer NOT NULL,
+      event_type text NOT NULL,
+      amount numeric(18, 2) NOT NULL,
+      source text NOT NULL DEFAULT 'manual',
+      trade_id integer,
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS forecast_loan_events_loan_year_idx
+      ON forecast_loan_events (loan_id, year)
+  `);
+
+  await pool.query(`
+    INSERT INTO forecast_loans (
+      asset_type,
+      asset_symbol,
+      loan_name,
+      principal_start,
+      interest_rate,
+      start_year,
+      repayment_type,
+      annual_principal_payment,
+      annual_interest_payment,
+      settle_on_asset_sell,
+      status,
+      note
+    )
+    VALUES
+      (
+        'Real Estate',
+        'Ariyana',
+        'Ariyana loan',
+        1285292000,
+        0,
+        2026,
+        'interest_only',
+        0,
+        0,
+        true,
+        'active',
+        'Forecast seed. Interest is already represented in Function.total interest; principal schedule is not connected yet.'
+      ),
+      (
+        'Business',
+        'Shop Mẹ & Bé',
+        'Shop Mẹ & Bé loan',
+        347488000,
+        0,
+        2026,
+        'interest_only',
+        0,
+        0,
+        true,
+        'active',
+        'Forecast seed. Interest is already represented in Function.total interest; principal schedule is not connected yet.'
+      )
+    ON CONFLICT (asset_symbol, loan_name, start_year) DO NOTHING
+  `);
 }

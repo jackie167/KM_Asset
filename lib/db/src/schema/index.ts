@@ -8,4 +8,5 @@ export * from "./portfolio-cash-flows";
 export * from "./expenses";
 export * from "./wealth-snapshots";
 export * from "./forecast-trades";
+export * from "./forecast-loans";
 export * from "./app-settings";
