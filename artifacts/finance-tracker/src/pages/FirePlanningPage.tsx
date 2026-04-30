@@ -124,7 +124,7 @@ function StepInput({ label, value, onChange, step, min, format }: {
         valueRef.current = clamp(valueRef.current + delta);
         onChange(valueRef.current);
       }, 80);
-    }, 400);
+    }, 2000);
   };
 
   const stopHold = () => {
