@@ -30,11 +30,35 @@ type ForecastTradeInput = {
   note?: string | null;
 };
 
-const FORECAST_LOANS = [
-  { asset: "Ariyana", principal: 1_285_292_000 },
-  { asset: "Shop Mẹ & Bé", principal: 347_488_000 },
-] as const;
-const FORECAST_LOAN_TOTAL = FORECAST_LOANS.reduce((sum, loan) => sum + loan.principal, 0);
+type ForecastLoan = {
+  id: number;
+  assetType: string;
+  assetSymbol: string;
+  loanName: string;
+  principalStart: number;
+  interestRate: number;
+  startYear: number;
+  endYear: number | null;
+  repaymentType: "interest_only" | "principal_interest" | "bullet" | "custom";
+  annualPrincipalPayment: number;
+  annualInterestPayment: number;
+  settleOnAssetSell: boolean;
+  status: "active" | "settled";
+  note: string | null;
+};
+
+type ForecastLoanEvent = {
+  id: number;
+  loanId: number;
+  year: number;
+  eventType: "drawdown" | "interest" | "principal_payment" | "settlement";
+  amount: number;
+  source: string;
+  tradeId: number | null;
+  note: string | null;
+};
+
+type ForecastLoanEventInput = Omit<ForecastLoanEvent, "id" | "tradeId"> & { tradeId?: number | null };
 
 function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {
   const assetType = trade.assetType.trim().toLowerCase();
@@ -74,6 +98,43 @@ async function deleteForecastTrade(id: number): Promise<void> {
   if (!res.ok) throw new Error("Không xóa được forecast trade.");
 }
 
+async function fetchForecastLoans(): Promise<ForecastLoan[]> {
+  const res = await fetch("/api/asset-forecast/loans");
+  if (!res.ok) throw new Error("Không đọc được forecast loans.");
+  return res.json();
+}
+
+async function updateForecastLoan(id: number, input: Partial<ForecastLoan>): Promise<ForecastLoan> {
+  const res = await fetch(`/api/asset-forecast/loans/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("Không cập nhật được forecast loan.");
+  return res.json();
+}
+
+async function fetchForecastLoanEvents(): Promise<ForecastLoanEvent[]> {
+  const res = await fetch("/api/asset-forecast/loan-events");
+  if (!res.ok) throw new Error("Không đọc được forecast loan events.");
+  return res.json();
+}
+
+async function createForecastLoanEvent(input: ForecastLoanEventInput): Promise<ForecastLoanEvent> {
+  const res = await fetch("/api/asset-forecast/loan-events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("Không lưu được forecast loan event.");
+  return res.json();
+}
+
+async function deleteForecastLoanEvent(id: number): Promise<void> {
+  const res = await fetch(`/api/asset-forecast/loan-events/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Không xóa được forecast loan event.");
+}
+
 function parseAmountInput(value: string): number {
   const cleaned = value.trim().replace(/[^\d,.-]/g, "");
   const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
@@ -83,6 +144,15 @@ function parseAmountInput(value: string): number {
 
 function formatPercentValue(value: number) {
   return `${value.toFixed(2)}%`;
+}
+
+function formatLoanEventType(value: ForecastLoanEvent["eventType"]) {
+  switch (value) {
+    case "drawdown": return "Vay thêm";
+    case "interest": return "Lãi vay";
+    case "principal_payment": return "Trả gốc";
+    case "settlement": return "Tất toán";
+  }
 }
 
 export default function AssetForecastPage() {
@@ -103,6 +173,11 @@ export default function AssetForecastPage() {
   const [tradeAssetKey, setTradeAssetKey] = useState("");
   const [tradeAmount, setTradeAmount] = useState("");
   const [tradeNote, setTradeNote] = useState("");
+  const [loanEventLoanId, setLoanEventLoanId] = useState("");
+  const [loanEventYear, setLoanEventYear] = useState("2026");
+  const [loanEventType, setLoanEventType] = useState<ForecastLoanEvent["eventType"]>("principal_payment");
+  const [loanEventAmount, setLoanEventAmount] = useState("");
+  const [loanEventNote, setLoanEventNote] = useState("");
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const debounceSaveDb = useCallback((key: string, value: string, delay = 1500) => {
@@ -138,10 +213,14 @@ export default function AssetForecastPage() {
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const freeCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
   const forecastTradesQuery = useQuery({ queryKey: ["asset-forecast-trades"], queryFn: fetchForecastTrades });
+  const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
+  const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
 
   const currentAssetRows = useMemo(() => currentAssetQuery.data ?? [], [currentAssetQuery.data]);
   const freeCashRows = useMemo(() => freeCashQuery.data ?? [], [freeCashQuery.data]);
   const forecastTrades = useMemo(() => forecastTradesQuery.data ?? [], [forecastTradesQuery.data]);
+  const forecastLoans = useMemo(() => forecastLoansQuery.data ?? [], [forecastLoansQuery.data]);
+  const forecastLoanEvents = useMemo(() => forecastLoanEventsQuery.data ?? [], [forecastLoanEventsQuery.data]);
 
   const allocationRatios = useMemo(() => {
     return INVEST_TYPES.reduce<Record<InvestType, number>>((acc, type) => {
@@ -218,14 +297,56 @@ export default function AssetForecastPage() {
   }, [forecastTrades]);
 
   const loanScheduleRows = useMemo(() => {
-    return FORECAST_YEARS.map((year) => ({
-      year,
-      openingDebt: FORECAST_LOAN_TOTAL,
-      drawdown: 0,
-      principalPayment: 0,
-      endingDebt: FORECAST_LOAN_TOTAL,
-    }));
-  }, []);
+    const eventsByLoanYear = new Map<string, ForecastLoanEvent[]>();
+    for (const event of forecastLoanEvents) {
+      const key = `${event.loanId}::${event.year}`;
+      eventsByLoanYear.set(key, [...(eventsByLoanYear.get(key) ?? []), event]);
+    }
+
+    const loanState = new Map(forecastLoans.map((loan) => [loan.id, loan.principalStart]));
+
+    return FORECAST_YEARS.map((year) => {
+      let openingDebt = 0;
+      let drawdown = 0;
+      let principalPayment = 0;
+      let settlement = 0;
+      let interest = 0;
+
+      for (const loan of forecastLoans) {
+        const starts = year >= loan.startYear;
+        const ended = loan.endYear != null && year > loan.endYear;
+        const startPrincipal = starts && !ended ? (loanState.get(loan.id) ?? loan.principalStart) : 0;
+        openingDebt += startPrincipal;
+        if (!starts || ended || loan.status === "settled") continue;
+
+        const events = eventsByLoanYear.get(`${loan.id}::${year}`) ?? [];
+        const eventDrawdown = events.filter((event) => event.eventType === "drawdown").reduce((sum, event) => sum + event.amount, 0);
+        const eventPrincipal = events.filter((event) => event.eventType === "principal_payment").reduce((sum, event) => sum + event.amount, 0);
+        const eventSettlement = events.filter((event) => event.eventType === "settlement").reduce((sum, event) => sum + event.amount, 0);
+        const eventInterest = events.filter((event) => event.eventType === "interest").reduce((sum, event) => sum + event.amount, 0);
+        const scheduledPrincipal = loan.repaymentType === "custom" ? 0 : loan.annualPrincipalPayment;
+        const scheduledInterest = loan.annualInterestPayment || startPrincipal * loan.interestRate;
+        const paidPrincipal = Math.min(Math.max(0, startPrincipal + eventDrawdown), scheduledPrincipal + eventPrincipal + eventSettlement);
+        const endingPrincipal = Math.max(0, startPrincipal + eventDrawdown - paidPrincipal);
+
+        drawdown += eventDrawdown;
+        principalPayment += scheduledPrincipal + eventPrincipal;
+        settlement += eventSettlement;
+        interest += scheduledInterest + eventInterest;
+        loanState.set(loan.id, endingPrincipal);
+      }
+
+      return {
+        year,
+        openingDebt,
+        drawdown,
+        interest,
+        principalPayment,
+        settlement,
+        endingDebt: Math.max(0, openingDebt + drawdown - principalPayment - settlement),
+      };
+    });
+  }, [forecastLoanEvents, forecastLoans]);
 
   const debtPrincipalPaymentByYear = useMemo(() => {
     return new Map(loanScheduleRows.map((row) => [row.year, row.principalPayment]));
@@ -242,11 +363,9 @@ export default function AssetForecastPage() {
   const finalFreeCashByYear = useMemo(() => {
     return new Map(FORECAST_YEARS.map((year) => [
       year,
-      (baseFreeCashByYear.get(year) ?? 0) +
-        (tradeCashByYear.get(year) ?? 0) -
-        (debtPrincipalPaymentByYear.get(year) ?? 0),
+      (baseFreeCashByYear.get(year) ?? 0) + (tradeCashByYear.get(year) ?? 0),
     ]));
-  }, [baseFreeCashByYear, debtPrincipalPaymentByYear, tradeCashByYear]);
+  }, [baseFreeCashByYear, tradeCashByYear]);
 
   const allocationRows = useMemo(() => {
     const rows = new Map<number, number>();
@@ -433,6 +552,25 @@ export default function AssetForecastPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] }),
   });
 
+  const updateLoanMutation = useMutation({
+    mutationFn: ({ id, input }: { id: number; input: Partial<ForecastLoan> }) => updateForecastLoan(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-forecast-loans"] }),
+  });
+
+  const createLoanEventMutation = useMutation({
+    mutationFn: createForecastLoanEvent,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["asset-forecast-loan-events"] });
+      setLoanEventAmount("");
+      setLoanEventNote("");
+    },
+  });
+
+  const deleteLoanEventMutation = useMutation({
+    mutationFn: deleteForecastLoanEvent,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-forecast-loan-events"] }),
+  });
+
   const openTradeDialog = () => {
     setEditingTrade(null);
     setTradeYear("2026");
@@ -476,6 +614,22 @@ export default function AssetForecastPage() {
     } else {
       createTradeMutation.mutate(input);
     }
+  };
+
+  const submitLoanEvent = () => {
+    const loanId = Number(loanEventLoanId || forecastLoans[0]?.id);
+    const year = Number(loanEventYear);
+    const amount = parseAmountInput(loanEventAmount);
+    if (!Number.isInteger(loanId) || loanId <= 0 || !Number.isInteger(year) || amount <= 0) return;
+
+    createLoanEventMutation.mutate({
+      loanId,
+      year,
+      eventType: loanEventType,
+      amount,
+      source: "manual",
+      note: loanEventNote.trim() || null,
+    });
   };
 
   return (
@@ -1008,6 +1162,195 @@ export default function AssetForecastPage() {
           </Card>
         </section>
 
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Chi tiết khoản vay forecast</p>
+            <p className="text-[10px] text-muted-foreground">Chưa nối vào free cash</p>
+          </div>
+          <Card className="p-4 md:p-5 space-y-5">
+            {forecastLoansQuery.isLoading ? (
+              <div className="space-y-2">
+                {[1, 2].map((row) => (
+                  <div key={row} className="h-8 rounded bg-muted animate-pulse" />
+                ))}
+              </div>
+            ) : forecastLoans.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Chưa có khoản vay forecast.</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[980px] text-xs">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                        <th className="py-2 pr-4 text-left font-medium">Tài sản</th>
+                        <th className="py-2 px-4 text-left font-medium">Khoản vay</th>
+                        <th className="py-2 px-4 text-right font-medium">Gốc đầu kỳ</th>
+                        <th className="py-2 px-4 text-right font-medium">Rate / năm</th>
+                        <th className="py-2 px-4 text-right font-medium">Gốc định kỳ</th>
+                        <th className="py-2 px-4 text-right font-medium">Lãi định kỳ</th>
+                        <th className="py-2 px-4 text-center font-medium">Tất toán khi bán</th>
+                        <th className="py-2 pl-4 text-left font-medium">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/40">
+                      {forecastLoans.map((loan) => (
+                        <tr key={loan.id}>
+                          <td className="py-2 pr-4 font-medium whitespace-nowrap">{loan.assetSymbol}</td>
+                          <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{loan.loanName}</td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap">
+                            <Input
+                              defaultValue={String(loan.principalStart)}
+                              inputMode="decimal"
+                              className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
+                              onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { principalStart: parseAmountInput(event.target.value) } })}
+                            />
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
+                              <input
+                                defaultValue={String(loan.interestRate * 100)}
+                                inputMode="decimal"
+                                className="w-14 bg-transparent text-right text-[11px] tabular-nums outline-none"
+                                onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { interestRate: parsePercentInput(event.target.value) / 100 } })}
+                              />
+                              <span className="text-[10px] text-muted-foreground">%</span>
+                            </div>
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap">
+                            <Input
+                              defaultValue={String(loan.annualPrincipalPayment)}
+                              inputMode="decimal"
+                              className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
+                              onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { annualPrincipalPayment: parseAmountInput(event.target.value) } })}
+                            />
+                          </td>
+                          <td className="py-2 px-4 text-right whitespace-nowrap">
+                            <Input
+                              defaultValue={String(loan.annualInterestPayment)}
+                              inputMode="decimal"
+                              className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
+                              onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { annualInterestPayment: parseAmountInput(event.target.value) } })}
+                            />
+                          </td>
+                          <td className="py-2 px-4 text-center">
+                            <input
+                              type="checkbox"
+                              defaultChecked={loan.settleOnAssetSell}
+                              onChange={(event) => updateLoanMutation.mutate({ id: loan.id, input: { settleOnAssetSell: event.target.checked } })}
+                            />
+                          </td>
+                          <td className="py-2 pl-4 text-muted-foreground min-w-[180px]">{loan.note || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_1fr_1fr_1.5fr_auto] items-end border-t border-border/40 pt-4">
+                  <label className="space-y-1.5 text-xs">
+                    <span className="text-muted-foreground">Khoản vay</span>
+                    <select
+                      value={loanEventLoanId || String(forecastLoans[0]?.id ?? "")}
+                      onChange={(event) => setLoanEventLoanId(event.target.value)}
+                      className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {forecastLoans.map((loan) => (
+                        <option key={loan.id} value={String(loan.id)}>{loan.assetSymbol}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1.5 text-xs">
+                    <span className="text-muted-foreground">Year</span>
+                    <select
+                      value={loanEventYear}
+                      onChange={(event) => setLoanEventYear(event.target.value)}
+                      className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {FORECAST_YEARS.map((year) => (
+                        <option key={year} value={String(year)}>{year}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1.5 text-xs">
+                    <span className="text-muted-foreground">Loại</span>
+                    <select
+                      value={loanEventType}
+                      onChange={(event) => setLoanEventType(event.target.value as ForecastLoanEvent["eventType"])}
+                      className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {(["principal_payment", "interest", "drawdown", "settlement"] as const).map((type) => (
+                        <option key={type} value={type}>{formatLoanEventType(type)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1.5 text-xs">
+                    <span className="text-muted-foreground">Amount</span>
+                    <Input
+                      value={loanEventAmount}
+                      onChange={(event) => setLoanEventAmount(event.target.value)}
+                      inputMode="decimal"
+                      className="h-9 text-xs tabular-nums"
+                    />
+                  </label>
+                  <label className="space-y-1.5 text-xs">
+                    <span className="text-muted-foreground">Note</span>
+                    <Input
+                      value={loanEventNote}
+                      onChange={(event) => setLoanEventNote(event.target.value)}
+                      className="h-9 text-xs"
+                    />
+                  </label>
+                  <Button size="sm" className="h-9" onClick={submitLoanEvent} disabled={createLoanEventMutation.isPending || parseAmountInput(loanEventAmount) <= 0}>
+                    Thêm
+                  </Button>
+                </div>
+
+                {forecastLoanEvents.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-xs">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                          <th className="py-2 pr-4 text-left font-medium">Year</th>
+                          <th className="py-2 px-4 text-left font-medium">Loan</th>
+                          <th className="py-2 px-4 text-left font-medium">Type</th>
+                          <th className="py-2 px-4 text-right font-medium">Amount</th>
+                          <th className="py-2 px-4 text-left font-medium">Note</th>
+                          <th className="py-2 pl-4 text-right font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {forecastLoanEvents.map((event) => {
+                          const loan = forecastLoans.find((item) => item.id === event.loanId);
+                          return (
+                            <tr key={event.id}>
+                              <td className="py-2 pr-4 font-medium whitespace-nowrap">{event.year}</td>
+                              <td className="py-2 px-4 whitespace-nowrap">{loan?.assetSymbol ?? event.loanId}</td>
+                              <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{formatLoanEventType(event.eventType)}</td>
+                              <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(event.amount)}</td>
+                              <td className="py-2 px-4 text-muted-foreground">{event.note || "—"}</td>
+                              <td className="py-2 pl-4 text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs text-muted-foreground"
+                                  onClick={() => deleteLoanEventMutation.mutate(event.id)}
+                                  disabled={deleteLoanEventMutation.isPending}
+                                >
+                                  Xóa
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+        </section>
+
         {/* ── Theo dõi khoản vay ───────────────────────────────────────── */}
         {(() => {
           const debtRows = loanScheduleRows.filter((row) =>
@@ -1022,9 +1365,11 @@ export default function AssetForecastPage() {
               </div>
               <Card className="overflow-hidden">
                 <div className="border-b border-border/40 px-4 py-3 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">Khoản vay đầu 2026: {formatVNDFull(FORECAST_LOAN_TOTAL)}</span>
+                  <span className="font-medium text-foreground">
+                    Khoản vay đầu 2026: {formatVNDFull(forecastLoans.reduce((sum, loan) => sum + loan.principalStart, 0))}
+                  </span>
                   <span className="ml-2">
-                    ({FORECAST_LOANS.map((loan) => `${loan.asset}: ${formatVNDFull(loan.principal)}`).join(" · ")})
+                    ({forecastLoans.map((loan) => `${loan.assetSymbol}: ${formatVNDFull(loan.principalStart)}`).join(" · ")})
                   </span>
                 </div>
                   <div className="overflow-x-auto">
