@@ -32,6 +32,9 @@ export type ForecastLoanEventInput = Omit<ForecastLoanEvent, "id" | "tradeId"> &
 
 export type ForecastLoanScheduleRow = {
   year: number;
+  loanId?: number;
+  loanName?: string;
+  assetSymbol?: string;
   openingDebt: number;
   drawdown: number;
   interest: number;
@@ -82,6 +85,26 @@ export function buildForecastLoanSchedule(
   events: ForecastLoanEvent[],
   years = FORECAST_YEARS,
 ): ForecastLoanScheduleRow[] {
+  const detailRows = buildForecastLoanDetailSchedule(loans, events, years);
+  return years.map((year) => {
+    const yearRows = detailRows.filter((row) => row.year === year);
+    return {
+      year,
+      openingDebt: yearRows.reduce((sum, row) => sum + row.openingDebt, 0),
+      drawdown: yearRows.reduce((sum, row) => sum + row.drawdown, 0),
+      interest: yearRows.reduce((sum, row) => sum + row.interest, 0),
+      principalPayment: yearRows.reduce((sum, row) => sum + row.principalPayment, 0),
+      settlement: yearRows.reduce((sum, row) => sum + row.settlement, 0),
+      endingDebt: yearRows.reduce((sum, row) => sum + row.endingDebt, 0),
+    };
+  });
+}
+
+export function buildForecastLoanDetailSchedule(
+  loans: ForecastLoan[],
+  events: ForecastLoanEvent[],
+  years = FORECAST_YEARS,
+): ForecastLoanScheduleRow[] {
   const eventsByLoanYear = new Map<string, ForecastLoanEvent[]>();
   for (const event of events) {
     const key = `${event.loanId}::${event.year}`;
@@ -89,20 +112,30 @@ export function buildForecastLoanSchedule(
   }
 
   const loanState = new Map(loans.map((loan) => [loan.id, loan.principalStart]));
+  const rows: ForecastLoanScheduleRow[] = [];
 
-  return years.map((year) => {
-    let openingDebt = 0;
-    let drawdown = 0;
-    let principalPayment = 0;
-    let settlement = 0;
-    let interest = 0;
-
+  for (const year of years) {
     for (const loan of loans) {
       const starts = year >= loan.startYear;
       const ended = loan.endYear != null && year > loan.endYear;
       const startPrincipal = starts && !ended ? (loanState.get(loan.id) ?? loan.principalStart) : 0;
-      openingDebt += startPrincipal;
-      if (!starts || ended || loan.status === "settled") continue;
+      let row: ForecastLoanScheduleRow = {
+        year,
+        loanId: loan.id,
+        loanName: loan.loanName,
+        assetSymbol: loan.assetSymbol,
+        openingDebt: startPrincipal,
+        drawdown: 0,
+        interest: 0,
+        principalPayment: 0,
+        settlement: 0,
+        endingDebt: startPrincipal,
+      };
+
+      if (!starts || ended || loan.status === "settled") {
+        rows.push(row);
+        continue;
+      }
 
       const loanEvents = eventsByLoanYear.get(`${loan.id}::${year}`) ?? [];
       const eventDrawdown = loanEvents.filter((event) => event.eventType === "drawdown").reduce((sum, event) => sum + event.amount, 0);
@@ -113,24 +146,24 @@ export function buildForecastLoanSchedule(
       const scheduledInterest = loan.annualInterestPayment || startPrincipal * loan.interestRate;
       const paidPrincipal = Math.min(Math.max(0, startPrincipal + eventDrawdown), scheduledPrincipal + eventPrincipal + eventSettlement);
       const endingPrincipal = Math.max(0, startPrincipal + eventDrawdown - paidPrincipal);
+      const requestedPrincipal = scheduledPrincipal + eventPrincipal;
+      const actualSettlement = Math.min(eventSettlement, paidPrincipal);
+      const actualPrincipal = Math.max(0, paidPrincipal - actualSettlement);
 
-      drawdown += eventDrawdown;
-      principalPayment += scheduledPrincipal + eventPrincipal;
-      settlement += eventSettlement;
-      interest += scheduledInterest + eventInterest;
+      row = {
+        ...row,
+        drawdown: eventDrawdown,
+        interest: scheduledInterest + eventInterest,
+        principalPayment: Math.min(requestedPrincipal, actualPrincipal),
+        settlement: actualSettlement,
+        endingDebt: endingPrincipal,
+      };
       loanState.set(loan.id, endingPrincipal);
+      rows.push(row);
     }
+  }
 
-    return {
-      year,
-      openingDebt,
-      drawdown,
-      interest,
-      principalPayment,
-      settlement,
-      endingDebt: Math.max(0, openingDebt + drawdown - principalPayment - settlement),
-    };
-  });
+  return rows;
 }
 
 export function getForecastDebtForYear(loans: ForecastLoan[], events: ForecastLoanEvent[], year = new Date().getFullYear()) {

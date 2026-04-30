@@ -20,6 +20,7 @@ import {
   parsePercentInput,
 } from "@/lib/asset-forecast";
 import {
+  buildForecastLoanDetailSchedule,
   buildForecastLoanSchedule,
   createForecastLoanEvent,
   deleteForecastLoanEvent,
@@ -241,6 +242,10 @@ export default function AssetForecastPage() {
 
   const loanScheduleRows = useMemo(() => (
     buildForecastLoanSchedule(forecastLoans, forecastLoanEvents)
+  ), [forecastLoanEvents, forecastLoans]);
+
+  const loanDetailScheduleRows = useMemo(() => (
+    buildForecastLoanDetailSchedule(forecastLoans, forecastLoanEvents)
   ), [forecastLoanEvents, forecastLoans]);
 
   const debtPrincipalPaymentByYear = useMemo(() => {
@@ -1260,6 +1265,9 @@ export default function AssetForecastPage() {
           const debtRows = loanScheduleRows.filter((row) =>
             row.openingDebt > 0 || row.drawdown > 0 || row.principalPayment > 0 || row.endingDebt > 0
           );
+          const detailRows = loanDetailScheduleRows.filter((row) =>
+            row.openingDebt > 0 || row.drawdown > 0 || row.principalPayment > 0 || row.settlement > 0 || row.endingDebt > 0
+          );
           if (debtRows.length === 0) return null;
           return (
             <section className="space-y-2">
@@ -1316,6 +1324,45 @@ export default function AssetForecastPage() {
                         })}
                       </tbody>
                     </table>
+                  </div>
+                  <div className="border-t border-border/40 px-4 py-3">
+                    <p className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">Chi tiết theo từng khoản vay</p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[860px] text-xs">
+                        <thead>
+                          <tr className="text-[9px] text-muted-foreground uppercase tracking-wider border-b border-border">
+                            <th className="py-2 pr-4 text-left font-normal">Năm</th>
+                            <th className="py-2 px-4 text-left font-normal">Khoản vay</th>
+                            <th className="py-2 px-4 text-right font-normal">Nợ đầu năm</th>
+                            <th className="py-2 px-4 text-right font-normal">Lãi vay</th>
+                            <th className="py-2 px-4 text-right font-normal">Trả gốc</th>
+                            <th className="py-2 px-4 text-right font-normal">Tất toán</th>
+                            <th className="py-2 pl-4 text-right font-normal">Nợ cuối năm</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/40">
+                          {detailRows.map((row) => (
+                            <tr key={`${row.year}-${row.loanId}`}>
+                              <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
+                              <td className="py-2 px-4 whitespace-nowrap">{row.assetSymbol ?? row.loanName}</td>
+                              <td className="py-2 px-4 text-right tabular-nums text-muted-foreground whitespace-nowrap">{formatVNDFull(row.openingDebt)}</td>
+                              <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.interest > 0 ? "text-red-300" : "text-muted-foreground"}`}>
+                                {row.interest > 0 ? formatVNDFull(row.interest) : "—"}
+                              </td>
+                              <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.principalPayment > 0 ? "text-red-300" : "text-muted-foreground"}`}>
+                                {row.principalPayment > 0 ? formatVNDFull(row.principalPayment) : "—"}
+                              </td>
+                              <td className={`py-2 px-4 text-right tabular-nums whitespace-nowrap ${row.settlement > 0 ? "text-red-300" : "text-muted-foreground"}`}>
+                                {row.settlement > 0 ? formatVNDFull(row.settlement) : "—"}
+                              </td>
+                              <td className={`py-2 pl-4 text-right tabular-nums font-semibold whitespace-nowrap ${row.endingDebt > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+                                {row.endingDebt > 0 ? formatVNDFull(row.endingDebt) : "Đã trả hết"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
               </Card>
             </section>
