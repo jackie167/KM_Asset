@@ -26,6 +26,12 @@ function formatPercent(value: number | null | undefined) {
   return `${(value * 100).toFixed(2)}%`;
 }
 
+function deriveMonthlyReturn(annual: number | null, monthly: unknown) {
+  if (typeof monthly === "number" && Number.isFinite(monthly)) return monthly;
+  if (annual == null || !Number.isFinite(annual) || annual <= -1) return null;
+  return Math.pow(1 + annual, 1 / 12) - 1;
+}
+
 function normalizeAssetType(type: string) {
   return type.trim().toLowerCase();
 }
@@ -161,9 +167,10 @@ async function fetchPortfolioXirr(): Promise<{ xirrAnnual: number | null; xirrMo
   const res = await fetch("/api/portfolio/xirr");
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status} ${res.statusText}`);
+  const xirrAnnual = typeof data?.xirrAnnual === "number" ? data.xirrAnnual : null;
   return {
-    xirrAnnual: typeof data?.xirrAnnual === "number" ? data.xirrAnnual : null,
-    xirrMonthly: typeof data?.xirrMonthly === "number" ? data.xirrMonthly : null,
+    xirrAnnual,
+    xirrMonthly: deriveMonthlyReturn(xirrAnnual, data?.xirrMonthly ?? data?.xirrMonth),
   };
 }
 

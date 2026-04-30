@@ -127,9 +127,16 @@ const TONE_CLASS: Record<Tone, string> = {
 async function fetchXirr() {
   const res = await fetch("/api/portfolio/xirr");
   const data = await res.json().catch(() => null);
+  const xirrAnnual = typeof data?.xirrAnnual === "number" ? data.xirrAnnual : null;
+  const xirrMonthly =
+    typeof data?.xirrMonthly === "number"
+      ? data.xirrMonthly
+      : xirrAnnual != null && Number.isFinite(xirrAnnual) && xirrAnnual > -1
+        ? Math.pow(1 + xirrAnnual, 1 / 12) - 1
+        : null;
   return {
-    xirrAnnual: typeof data?.xirrAnnual === "number" ? data.xirrAnnual : null,
-    xirrMonthly: typeof data?.xirrMonthly === "number" ? data.xirrMonthly : null,
+    xirrAnnual,
+    xirrMonthly,
   };
 }
 
