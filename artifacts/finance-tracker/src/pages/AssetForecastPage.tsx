@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, fetchTotalAssetRows } from "@/lib/excel-sheets";
+import { CASHFLOW_SOURCE_SHEET } from "@/lib/excel-sheets";
 import { CURRENT_ASSET_SHEET } from "@/pages/wealthAllocationData";
 import {
   FORECAST_YEARS, INITIAL_2026_FREE_CASH, INVEST_TYPES, type InvestType,
@@ -29,6 +29,12 @@ type ForecastTradeInput = {
   amount: number;
   note?: string | null;
 };
+
+const FORECAST_LOANS = [
+  { asset: "Ariyana", principal: 1_285_292_000 },
+  { asset: "Shop Mẹ & Bé", principal: 347_488_000 },
+] as const;
+const FORECAST_LOAN_TOTAL = FORECAST_LOANS.reduce((sum, loan) => sum + loan.principal, 0);
 
 function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {
   const assetType = trade.assetType.trim().toLowerCase();
@@ -132,7 +138,6 @@ export default function AssetForecastPage() {
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const freeCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
   const forecastTradesQuery = useQuery({ queryKey: ["asset-forecast-trades"], queryFn: fetchForecastTrades });
-  const loanRowsQuery = useQuery({ queryKey: ["excel-total-asset-rows"], queryFn: fetchTotalAssetRows });
 
   const currentAssetRows = useMemo(() => currentAssetQuery.data ?? [], [currentAssetQuery.data]);
   const freeCashRows = useMemo(() => freeCashQuery.data ?? [], [freeCashQuery.data]);
@@ -213,27 +218,14 @@ export default function AssetForecastPage() {
   }, [forecastTrades]);
 
   const loanScheduleRows = useMemo(() => {
-    const sourceRows = [...(loanRowsQuery.data ?? [])]
-      .filter((row) => Number.isFinite(row.year))
-      .sort((left, right) => left.year - right.year);
-    const debtByYear = new Map(sourceRows.map((row) => [row.year, row.debt]));
-    const initialDebt = sourceRows.filter((row) => row.year < FORECAST_YEARS[0]).at(-1)?.debt ?? 0;
-
-    return FORECAST_YEARS.reduce<{
-      previousDebt: number;
-      rows: Array<{ year: number; openingDebt: number; drawdown: number; principalPayment: number; endingDebt: number }>;
-    }>((state, year) => {
-      const openingDebt = state.previousDebt;
-      const endingDebt = debtByYear.get(year) ?? openingDebt;
-      const drawdown = Math.max(0, endingDebt - openingDebt);
-      const principalPayment = Math.max(0, openingDebt - endingDebt);
-
-      return {
-        previousDebt: endingDebt,
-        rows: [...state.rows, { year, openingDebt, drawdown, principalPayment, endingDebt }],
-      };
-    }, { previousDebt: initialDebt, rows: [] }).rows;
-  }, [loanRowsQuery.data]);
+    return FORECAST_YEARS.map((year) => ({
+      year,
+      openingDebt: FORECAST_LOAN_TOTAL,
+      drawdown: 0,
+      principalPayment: 0,
+      endingDebt: FORECAST_LOAN_TOTAL,
+    }));
+  }, []);
 
   const debtPrincipalPaymentByYear = useMemo(() => {
     return new Map(loanScheduleRows.map((row) => [row.year, row.principalPayment]));
@@ -1021,17 +1013,20 @@ export default function AssetForecastPage() {
           const debtRows = loanScheduleRows.filter((row) =>
             row.openingDebt > 0 || row.drawdown > 0 || row.principalPayment > 0 || row.endingDebt > 0
           );
-          if (!loanRowsQuery.isLoading && debtRows.length === 0) return null;
+          if (debtRows.length === 0) return null;
           return (
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Loan forecast từ sheet Total Asset</p>
-                <p className="text-[10px] text-muted-foreground">Trả gốc vay đã trừ vào free cash</p>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Loan forecast</p>
+                <p className="text-[10px] text-muted-foreground">Tạm tách khỏi Wealth/Financial, chưa ghi nhận trả gốc</p>
               </div>
               <Card className="overflow-hidden">
-                {loanRowsQuery.isLoading ? (
-                  <div className="p-6 text-center text-sm text-muted-foreground">Loading...</div>
-                ) : (
+                <div className="border-b border-border/40 px-4 py-3 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Khoản vay đầu 2026: {formatVNDFull(FORECAST_LOAN_TOTAL)}</span>
+                  <span className="ml-2">
+                    ({FORECAST_LOANS.map((loan) => `${loan.asset}: ${formatVNDFull(loan.principal)}`).join(" · ")})
+                  </span>
+                </div>
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[720px] text-xs">
                       <thead>
@@ -1074,7 +1069,6 @@ export default function AssetForecastPage() {
                       </tbody>
                     </table>
                   </div>
-                )}
               </Card>
             </section>
           );
