@@ -25,6 +25,7 @@ import { getLatestPrices } from "../lib/priceFetcher.js";
 const router: IRouter = Router();
 const STOCK_RETURN_INITIAL_AT = new Date("2026-01-01T00:00:00.000Z");
 const ASSET_RETURN_SETTING_KEY = "asset_forecast_asset_returns";
+const INVESTMENT_RETURN_SETTING_KEY = "asset_forecast_investment_returns";
 const FINANCIAL_FORECAST_TYPES = new Set(["cash", "stock", "gold", "fund", "crypto"]);
 
 function normalizeHoldingType(type: string): string {
@@ -47,6 +48,10 @@ function usesManualPortfolioValue(type: string): boolean {
 function isFinancialForecastAsset(type: string, symbol: string): boolean {
   return FINANCIAL_FORECAST_TYPES.has(normalizeHoldingType(type)) ||
     FINANCIAL_FORECAST_TYPES.has(normalizeHoldingType(symbol));
+}
+
+function isCashHolding(type: string, symbol: string): boolean {
+  return normalizeHoldingType(type) === "cash" || normalizeHoldingType(symbol) === "cash";
 }
 
 function resolveHoldingCurrentValue(input: { type: string; quantity: number; currentPrice: number | null }): number | null {
@@ -215,25 +220,96 @@ function currentYearFixedAssetValue(input: {
   return Math.max(0, Math.round(valueBeforeTrades + input.tradeAdjustment));
 }
 
+function parseJsonRecord(value: string | null | undefined): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function monthStart(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, months: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function cashFlowDelta(kind: string, amount: number): number {
+  const normalizedKind = normalizeHoldingType(kind);
+  if (normalizedKind === "deposit" || normalizedKind === "contribution") return amount;
+  if (normalizedKind === "withdrawal") return -amount;
+  return 0;
+}
+
+function transactionCashDelta(transaction: typeof transactionsTable.$inferSelect): number {
+  if (transaction.status !== "applied") return 0;
+  if (normalizeSymbol(transaction.fundingSource) !== "CASH") return 0;
+  const amount = parseFloat(String(transaction.netAmount ?? transaction.totalValue));
+  if (!Number.isFinite(amount)) return 0;
+  return transaction.side === "buy" ? -amount : amount;
+}
+
+function calculateForecastCashValue(input: {
+  baseValue: number;
+  annualRate: number;
+  cashFlows: Array<typeof portfolioCashFlowsTable.$inferSelect>;
+  transactions: Array<typeof transactionsTable.$inferSelect>;
+  now?: Date;
+}): number {
+  const now = input.now ?? new Date();
+  const cutoff = monthStart(now);
+  if (cutoff <= STOCK_RETURN_INITIAL_AT) return Math.max(0, Math.round(input.baseValue));
+
+  const monthlyRate = Math.pow(1 + input.annualRate, 1 / 12) - 1;
+  let balance = input.baseValue;
+
+  for (let periodStart = monthStart(STOCK_RETURN_INITIAL_AT); periodStart < cutoff; periodStart = addMonths(periodStart, 1)) {
+    const periodEnd = addMonths(periodStart, 1);
+    const cashFlowDeltaForMonth = input.cashFlows.reduce((sum, flow) => {
+      if (flow.occurredAt < periodStart || flow.occurredAt >= periodEnd) return sum;
+      const amount = parseFloat(String(flow.amount));
+      return Number.isFinite(amount) ? sum + cashFlowDelta(flow.kind, amount) : sum;
+    }, 0);
+    const tradeDeltaForMonth = input.transactions.reduce((sum, transaction) => {
+      if (transaction.executedAt < periodStart || transaction.executedAt >= periodEnd) return sum;
+      return sum + transactionCashDelta(transaction);
+    }, 0);
+
+    balance = Math.max(0, balance + cashFlowDeltaForMonth + tradeDeltaForMonth);
+    balance = Math.max(0, balance * (1 + monthlyRate));
+  }
+
+  return Math.max(0, Math.round(balance));
+}
+
 async function getPortfolioCurrentValueSnapshot() {
-  const [holdings, latestPrices, baseAssets, assetReturnSettingRows, currentYearForecastTrades] = await Promise.all([
+  const [
+    holdings,
+    latestPrices,
+    baseAssets,
+    assetReturnSettingRows,
+    investmentReturnSettingRows,
+    currentYearForecastTrades,
+    portfolioCashFlows,
+    portfolioTransactions,
+  ] = await Promise.all([
     db.select().from(holdingsTable).orderBy(holdingsTable.createdAt),
     getLatestPrices(),
     db.select().from(baseAssetsTable),
     db.select().from(appSettingsTable).where(eq(appSettingsTable.key, ASSET_RETURN_SETTING_KEY)).limit(1),
+    db.select().from(appSettingsTable).where(eq(appSettingsTable.key, INVESTMENT_RETURN_SETTING_KEY)).limit(1),
     db.select().from(forecastTradesTable).where(eq(forecastTradesTable.year, new Date().getFullYear())),
+    db.select().from(portfolioCashFlowsTable).where(gte(portfolioCashFlowsTable.occurredAt, STOCK_RETURN_INITIAL_AT)),
+    db.select().from(transactionsTable).where(gte(transactionsTable.executedAt, STOCK_RETURN_INITIAL_AT)),
   ]);
 
-  const assetReturnInputs = (() => {
-    const raw = assetReturnSettingRows[0]?.value;
-    if (!raw) return {} as Record<string, string>;
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
-    } catch {
-      return {} as Record<string, string>;
-    }
-  })();
+  const assetReturnInputs = parseJsonRecord(assetReturnSettingRows[0]?.value);
+  const investmentReturnInputs = parseJsonRecord(investmentReturnSettingRows[0]?.value);
+  const cashAnnualRate = parsePercentSetting(investmentReturnInputs["cash"] ?? "4");
 
   const baseAssetByKey = new Map(baseAssets.map((asset) => [fixedAssetKey(asset.assetType, asset.symbol), asset]));
   const forecastTradeAdjustmentByKey = new Map<string, number>();
@@ -280,6 +356,15 @@ async function getPortfolioCurrentValueSnapshot() {
         }
       : undefined);
     const manualUnitPrice = h.manualPrice != null ? parseFloat(String(h.manualPrice)) : null;
+    const costOfCapital = h.costOfCapital != null ? parseFloat(String(h.costOfCapital)) : null;
+    const cashCurrentValue = isCashHolding(h.type, h.symbol)
+      ? calculateForecastCashValue({
+          baseValue: costOfCapital ?? manualUnitPrice ?? 0,
+          annualRate: cashAnnualRate,
+          cashFlows: portfolioCashFlows,
+          transactions: portfolioTransactions,
+        })
+      : null;
     const fixedAssetCurrentValue = fixedAsset
       ? currentYearFixedAssetValue({
           baseValue: parseFloat(String(fixedAsset.baseValue)),
@@ -288,8 +373,8 @@ async function getPortfolioCurrentValueSnapshot() {
           tradeAdjustment: forecastTradeAdjustmentByKey.get(fixedAssetKey(fixedAsset.assetType, fixedAsset.symbol)) ?? 0,
         })
       : null;
-    const currentPrice = fixedAssetCurrentValue ?? priceData?.price ?? manualUnitPrice;
-    const currentValue = fixedAssetCurrentValue ?? resolveHoldingCurrentValue({ type: h.type, quantity: qty, currentPrice });
+    const currentPrice = cashCurrentValue ?? fixedAssetCurrentValue ?? priceData?.price ?? manualUnitPrice;
+    const currentValue = cashCurrentValue ?? fixedAssetCurrentValue ?? resolveHoldingCurrentValue({ type: h.type, quantity: qty, currentPrice });
 
     if (currentValue != null) {
       if (normalizedType === "stock") stockValue += currentValue;
@@ -297,7 +382,6 @@ async function getPortfolioCurrentValueSnapshot() {
       else otherValue += currentValue;
     }
 
-    const costOfCapital = h.costOfCapital != null ? parseFloat(String(h.costOfCapital)) : null;
     const interest = h.interest != null ? parseFloat(String(h.interest)) : null;
 
     return {
