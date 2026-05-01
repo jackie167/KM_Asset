@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
+import AllocationChart from "@/pages/assets/AllocationChart";
 import HoldingsTable from "@/pages/assets/HoldingsTable";
 import PerformanceChart from "@/pages/assets/PerformanceChart";
 import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
@@ -192,15 +193,25 @@ export default function WealthAllocationTypePage() {
               onToggleHideValues={toggleHideValues}
             />
 
-            <PerformanceChart
-              title="Performance"
-              seriesLabel=""
-              chartData={chartData}
-              hideValues={hideValues}
-              selectedRange={snapshotRange}
-              onRangeChange={setSnapshotRange}
-              emptyMessage="No wealth history yet."
-            />
+            {(totalValue > 0 || typeHoldings.length > 0) && (
+              <div className="grid md:grid-cols-2 gap-4">
+                {totalValue > 0 && (
+                  <AllocationChart
+                    holdings={typeHoldings}
+                    totalValue={totalValue}
+                  />
+                )}
+                <PerformanceChart
+                  title="Performance"
+                  seriesLabel=""
+                  chartData={chartData}
+                  hideValues={hideValues}
+                  selectedRange={snapshotRange}
+                  onRangeChange={setSnapshotRange}
+                  emptyMessage="No wealth history yet."
+                />
+              </div>
+            )}
 
             <HoldingsTable
               holdings={typeHoldings}
