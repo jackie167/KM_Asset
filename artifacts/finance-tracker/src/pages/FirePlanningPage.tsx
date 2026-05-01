@@ -4,14 +4,13 @@ import { Card } from "@/components/ui/card";
 import PageHeader from "@/pages/PageHeader";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, fetchCashflowData } from "@/lib/excel-sheets";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 import { fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import {
   INVEST_TYPES, DEFAULT_RATES, DEFAULT_ALLOCATION_RATIOS,
   DB_KEYS, readJsonRecord, parsePercentInput,
   fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
-  computeForecastTotals, loadDbSetting, saveDbSetting,
+  computeForecastTotals, loadDbSetting, saveDbSetting, fetchIncomeExpenseCashflowData,
 } from "@/lib/asset-forecast";
 
 const FIRE_DB_KEYS = {
@@ -179,7 +178,7 @@ export default function FirePlanningPage() {
   // Queries
   const investQuery = useQuery({ queryKey: ["dashboard-investment"], queryFn: fetchInvestmentSummary });
   const xirrQuery = useQuery({ queryKey: ["portfolio-xirr"], queryFn: fetchXirr });
-  const cashflowQuery = useQuery({ queryKey: ["excel-function-cashflow"], queryFn: fetchCashflowData });
+  const cashflowQuery = useQuery({ queryKey: ["income-expense-cashflow", new Date().getFullYear()], queryFn: () => fetchIncomeExpenseCashflowData() });
   const wealthQuery = useQuery({ queryKey: ["wealth-allocation-holdings"], queryFn: fetchWealthAllocationHoldings });
   const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
   const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
@@ -363,7 +362,7 @@ export default function FirePlanningPage() {
             </div>
             {autoSpend > 0 && customSpend === 0 && (
               <p className="mt-3 text-[11px] text-muted-foreground">
-                Chi tiêu tự động từ sheet {CASHFLOW_SOURCE_SHEET} ({cashflowQuery.data?.year}): {fmt(autoSpend, hide)} / năm
+                Chi tiêu tự động từ income_expense ({cashflowQuery.data?.year}): {fmt(autoSpend, hide)} / năm
               </p>
             )}
             {xirrActual != null && (

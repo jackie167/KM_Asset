@@ -1,7 +1,16 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, gt, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, holdingsTable, portfolioCashFlowsTable, snapshotsTable, transactionsTable } from "../../../lib/db/src/index.ts";
+import {
+  appSettingsTable,
+  baseAssetsTable,
+  db,
+  forecastTradesTable,
+  holdingsTable,
+  portfolioCashFlowsTable,
+  snapshotsTable,
+  transactionsTable,
+} from "../../../lib/db/src/index.ts";
 import {
   ListHoldingsResponse,
   CreateHoldingBody,
@@ -15,14 +24,29 @@ import { getLatestPrices } from "../lib/priceFetcher.js";
 
 const router: IRouter = Router();
 const STOCK_RETURN_INITIAL_AT = new Date("2026-01-01T00:00:00.000Z");
+const ASSET_RETURN_SETTING_KEY = "asset_forecast_asset_returns";
+const FINANCIAL_FORECAST_TYPES = new Set(["cash", "stock", "gold", "fund", "crypto"]);
 
 function normalizeHoldingType(type: string): string {
   return type.trim().toLowerCase();
 }
 
+function normalizeSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase();
+}
+
+function fixedAssetKey(type: string, symbol: string): string {
+  return `${normalizeHoldingType(type)}::${normalizeSymbol(symbol)}`;
+}
+
 function usesManualPortfolioValue(type: string): boolean {
   const normalized = normalizeHoldingType(type);
   return normalized !== "stock" && normalized !== "gold" && normalized !== "crypto";
+}
+
+function isFinancialForecastAsset(type: string, symbol: string): boolean {
+  return FINANCIAL_FORECAST_TYPES.has(normalizeHoldingType(type)) ||
+    FINANCIAL_FORECAST_TYPES.has(normalizeHoldingType(symbol));
 }
 
 function resolveHoldingCurrentValue(input: { type: string; quantity: number; currentPrice: number | null }): number | null {
@@ -169,11 +193,58 @@ function latestPriceMap(latestPrices: Awaited<ReturnType<typeof getLatestPrices>
   return priceMap;
 }
 
+function parsePercentSetting(value: unknown): number {
+  const cleaned = String(value ?? "").trim().replace(/[^\d,.-]/g, "");
+  const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed / 100 : 0;
+}
+
+function elapsedMonthsFromBaseYear(baseYear = 2026, now = new Date()): number {
+  return Math.max(0, (now.getFullYear() - baseYear) * 12 + now.getMonth());
+}
+
+function currentYearFixedAssetValue(input: {
+  baseValue: number;
+  baseYear: number;
+  annualRate: number;
+  tradeAdjustment: number;
+}) {
+  const months = elapsedMonthsFromBaseYear(input.baseYear);
+  const valueBeforeTrades = input.baseValue * Math.pow(1 + input.annualRate, months / 12);
+  return Math.max(0, Math.round(valueBeforeTrades + input.tradeAdjustment));
+}
+
 async function getPortfolioCurrentValueSnapshot() {
-  const [holdings, latestPrices] = await Promise.all([
+  const [holdings, latestPrices, baseAssets, assetReturnSettingRows, currentYearForecastTrades] = await Promise.all([
     db.select().from(holdingsTable).orderBy(holdingsTable.createdAt),
     getLatestPrices(),
+    db.select().from(baseAssetsTable),
+    db.select().from(appSettingsTable).where(eq(appSettingsTable.key, ASSET_RETURN_SETTING_KEY)).limit(1),
+    db.select().from(forecastTradesTable).where(eq(forecastTradesTable.year, new Date().getFullYear())),
   ]);
+
+  const assetReturnInputs = (() => {
+    const raw = assetReturnSettingRows[0]?.value;
+    if (!raw) return {} as Record<string, string>;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+    } catch {
+      return {} as Record<string, string>;
+    }
+  })();
+
+  const baseAssetByKey = new Map(baseAssets.map((asset) => [fixedAssetKey(asset.assetType, asset.symbol), asset]));
+  const forecastTradeAdjustmentByKey = new Map<string, number>();
+  for (const trade of currentYearForecastTrades) {
+    if (isFinancialForecastAsset(trade.assetType, trade.symbol)) continue;
+    const amount = parseFloat(String(trade.amount));
+    if (!Number.isFinite(amount)) continue;
+    const key = fixedAssetKey(trade.assetType, trade.symbol);
+    const signedAmount = trade.side === "sell" ? -amount : amount;
+    forecastTradeAdjustmentByKey.set(key, (forecastTradeAdjustmentByKey.get(key) ?? 0) + signedAmount);
+  }
 
   const priceMap = new Map<string, { price: number; change: number | null; changePercent: number | null }>();
   for (const p of latestPrices) {
@@ -198,8 +269,9 @@ async function getPortfolioCurrentValueSnapshot() {
 
   const holdingsWithValue = holdings.map((h) => {
     const qty = parseFloat(String(h.quantity));
-    const sym = h.symbol.toUpperCase();
+    const sym = normalizeSymbol(h.symbol);
     const normalizedType = normalizeHoldingType(h.type);
+    const fixedAsset = baseAssetByKey.get(fixedAssetKey(h.type, h.symbol));
     const priceData = priceMap.get(sym) ?? (normalizedType === "gold" && goldBenchmark
       ? {
           price: parseFloat(String(goldBenchmark.price)),
@@ -208,8 +280,16 @@ async function getPortfolioCurrentValueSnapshot() {
         }
       : undefined);
     const manualUnitPrice = h.manualPrice != null ? parseFloat(String(h.manualPrice)) : null;
-    const currentPrice = priceData?.price ?? manualUnitPrice;
-    const currentValue = resolveHoldingCurrentValue({ type: h.type, quantity: qty, currentPrice });
+    const fixedAssetCurrentValue = fixedAsset
+      ? currentYearFixedAssetValue({
+          baseValue: parseFloat(String(fixedAsset.baseValue)),
+          baseYear: fixedAsset.baseYear,
+          annualRate: parsePercentSetting(assetReturnInputs[fixedAssetKey(fixedAsset.assetType, fixedAsset.symbol)]),
+          tradeAdjustment: forecastTradeAdjustmentByKey.get(fixedAssetKey(fixedAsset.assetType, fixedAsset.symbol)) ?? 0,
+        })
+      : null;
+    const currentPrice = fixedAssetCurrentValue ?? priceData?.price ?? manualUnitPrice;
+    const currentValue = fixedAssetCurrentValue ?? resolveHoldingCurrentValue({ type: h.type, quantity: qty, currentPrice });
 
     if (currentValue != null) {
       if (normalizedType === "stock") stockValue += currentValue;

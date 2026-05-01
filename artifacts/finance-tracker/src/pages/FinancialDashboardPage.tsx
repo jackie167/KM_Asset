@@ -6,7 +6,7 @@ import PageHeader from "@/pages/PageHeader";
 import { Card } from "@/components/ui/card";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET, fetchCashflowData } from "@/lib/excel-sheets";
+import { fetchIncomeExpenseCashflowData } from "@/lib/asset-forecast";
 import { buildForecastLoanSchedule, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
@@ -242,7 +242,7 @@ export default function FinancialDashboardPage() {
   const xirrQuery = useQuery({ queryKey: ["portfolio-xirr"], queryFn: fetchXirr });
   const transactionsQuery = useQuery({ queryKey: ["transactions"], queryFn: fetchTransactions });
   const portfolioCashFlowsQuery = useQuery({ queryKey: ["portfolio-cash-flows"], queryFn: fetchCashFlows });
-  const cashflowQuery = useQuery({ queryKey: ["excel-function-cashflow"], queryFn: fetchCashflowData });
+  const cashflowQuery = useQuery({ queryKey: ["income-expense-cashflow", new Date().getFullYear()], queryFn: () => fetchIncomeExpenseCashflowData() });
   const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
   const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
 
@@ -520,7 +520,7 @@ export default function FinancialDashboardPage() {
               {cashflowQuery.isLoading ? (
                 <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-5 rounded bg-muted animate-pulse" />)}</div>
               ) : !cashflowQuery.data ? (
-                <p className="text-xs text-muted-foreground">Không thể đọc sheet {CASHFLOW_SOURCE_SHEET}.</p>
+                <p className="text-xs text-muted-foreground">Không thể đọc income_expense.</p>
               ) : (
                 <div className="space-y-3">
                   {[

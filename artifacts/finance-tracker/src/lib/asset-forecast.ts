@@ -1,4 +1,4 @@
-import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum } from "@/lib/excel-sheets";
+import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum, type CashflowData } from "@/lib/excel-sheets";
 import { fetchBaseAssetHoldings } from "@/pages/wealthAllocationData";
 import type { HoldingItem } from "@/pages/assets/types";
 
@@ -145,6 +145,29 @@ export async function fetchFreeCashRows(): Promise<FreeCashRow[]> {
     }
     return parsed;
   } catch { return []; }
+}
+
+export async function fetchIncomeExpenseCashflowData(year = new Date().getFullYear()): Promise<CashflowData | null> {
+  const rows = await fetchFreeCashRows();
+  const row =
+    rows.find((item) => item.year === year) ??
+    rows.findLast((item) => item.year <= year) ??
+    rows[0];
+
+  if (!row) return null;
+
+  const income = row.income + row.otherIncome;
+  const expense = row.expense + row.otherExpense;
+  const savings = income - expense;
+
+  return {
+    year: row.year,
+    income,
+    expense,
+    interest: row.totalInterest,
+    savingsRate: income > 0 ? savings / income : null,
+    interestBurden: income > 0 ? row.totalInterest / income : null,
+  };
 }
 
 export async function saveIncomeExpenseRows(rows: FreeCashRow[], mode: "replace" | "import" = "replace"): Promise<FreeCashRow[]> {
