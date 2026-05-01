@@ -94,6 +94,67 @@ export function parseCurrentAssetRows(rows: Array<Array<string | number>>): Hold
     .filter((holding): holding is HoldingItem => holding !== null);
 }
 
+export type BaseAsset = {
+  id: number;
+  assetType: string;
+  symbol: string;
+  baseYear: number;
+  baseValue: number;
+  assumedReturnRate: number;
+  note: string | null;
+};
+
+function baseAssetToHolding(asset: BaseAsset): HoldingItem {
+  return {
+    id: asset.id,
+    symbol: asset.symbol,
+    type: normalizeWealthType(asset.assetType),
+    quantity: 1,
+    currentPrice: asset.baseValue,
+    currentValue: asset.baseValue,
+    change: null,
+    changePercent: null,
+    manualPrice: asset.baseValue,
+  };
+}
+
+async function importBaseAssets(holdings: HoldingItem[]): Promise<BaseAsset[]> {
+  const res = await fetch("/api/base-assets/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      replace: false,
+      assets: holdings.map((holding) => ({
+        assetType: holding.type,
+        symbol: holding.symbol,
+        baseYear: 2026,
+        baseValue: holding.currentValue ?? 0,
+        assumedReturnRate: 0,
+        note: "Imported from Current asset sheet",
+      })),
+    }),
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchBaseAssetHoldings(): Promise<HoldingItem[]> {
+  const dbRes = await fetch("/api/base-assets");
+  if (dbRes.ok) {
+    const baseAssets = await dbRes.json() as BaseAsset[];
+    if (baseAssets.length > 0) return baseAssets.map(baseAssetToHolding);
+  }
+
+  const sheetRes = await fetch(`/api/excel/sheet?name=${encodeURIComponent(CURRENT_ASSET_SHEET)}`);
+  const sheetData = await readJsonSafe(sheetRes);
+  if (!sheetRes.ok) throw new Error(sheetData?.error || "Unable to load base assets.");
+  const parsed = parseCurrentAssetRows(Array.isArray(sheetData?.rows) ? sheetData.rows : []);
+  if (parsed.length === 0) return [];
+
+  const imported = await importBaseAssets(parsed).catch(() => []);
+  return imported.length > 0 ? imported.map(baseAssetToHolding) : parsed;
+}
+
 async function fetchPortfolioInvestmentHoldings(): Promise<HoldingItem[]> {
   const res = await fetch("/api/portfolio/summary");
   if (!res.ok) return [];
@@ -109,16 +170,12 @@ export async function fetchFinancialDetailHoldings(): Promise<HoldingItem[]> {
 }
 
 export async function fetchWealthAllocationHoldings() {
-  const [sheetRes, investmentHoldings] = await Promise.all([
-    fetch(`/api/excel/sheet?name=${encodeURIComponent(CURRENT_ASSET_SHEET)}`),
+  const [baseHoldings, investmentHoldings] = await Promise.all([
+    fetchBaseAssetHoldings(),
     fetchPortfolioInvestmentHoldings(),
   ]);
 
-  const sheetData = await readJsonSafe(sheetRes);
-  if (!sheetRes.ok) throw new Error(sheetData?.error || "Unable to load wealth allocation sheet.");
-  const rows = Array.isArray(sheetData?.rows) ? sheetData.rows : [];
-
-  const sheetHoldings = parseCurrentAssetRows(rows).filter((holding) => !FINANCIAL_TYPES.has(holding.type));
+  const sheetHoldings = baseHoldings.filter((holding) => !FINANCIAL_TYPES.has(holding.type));
 
   if (investmentHoldings.length === 0) return sheetHoldings;
 

@@ -1,5 +1,5 @@
 import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum } from "@/lib/excel-sheets";
-import { CURRENT_ASSET_SHEET, parseCurrentAssetRows } from "@/pages/wealthAllocationData";
+import { fetchBaseAssetHoldings } from "@/pages/wealthAllocationData";
 import type { HoldingItem } from "@/pages/assets/types";
 
 export const FORECAST_YEARS = Array.from({ length: 2044 - 2026 + 1 }, (_, i) => 2026 + i);
@@ -97,12 +97,7 @@ export async function saveDbSetting(key: string, value: string): Promise<void> {
 }
 
 export async function fetchCurrentAssetData(): Promise<HoldingItem[]> {
-  try {
-    const res = await fetch(`/api/excel/sheet?name=${encodeURIComponent(CURRENT_ASSET_SHEET)}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return parseCurrentAssetRows(Array.isArray(data?.rows) ? data.rows : []);
-  } catch { return []; }
+  try { return await fetchBaseAssetHoldings(); } catch { return []; }
 }
 
 export async function fetchForecastTrades(): Promise<ForecastTrade[]> {

@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
 import { CASHFLOW_SOURCE_SHEET } from "@/lib/excel-sheets";
-import { CURRENT_ASSET_SHEET } from "@/pages/wealthAllocationData";
 import {
   FORECAST_YEARS, INITIAL_2026_FREE_CASH, INVEST_TYPES, type InvestType,
   DEFAULT_RATES, TYPE_LABELS, DEFAULT_ALLOCATION_RATIOS,
@@ -1146,7 +1145,7 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Fixed asset từ sheet {CURRENT_ASSET_SHEET}
+              Fixed asset từ DB base assets
             </p>
             <p className="text-[10px] text-muted-foreground">
               {fixedAssetRows.length} dòng · tổng {formatVNDFull(initialFixedTotal)}
@@ -1160,7 +1159,7 @@ export default function AssetForecastPage() {
                 ))}
               </div>
             ) : fixedAssetRows.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu từ sheet {CURRENT_ASSET_SHEET}.</p>
+              <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu base assets.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[2200px] text-xs">

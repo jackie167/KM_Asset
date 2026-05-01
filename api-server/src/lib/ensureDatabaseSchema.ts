@@ -117,6 +117,25 @@ export async function ensureDatabaseSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS base_assets (
+      id serial PRIMARY KEY,
+      asset_type text NOT NULL,
+      symbol text NOT NULL,
+      base_year integer NOT NULL DEFAULT 2026,
+      base_value numeric(22, 2) NOT NULL,
+      assumed_return_rate numeric(10, 6) NOT NULL DEFAULT 0,
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS base_assets_year_type_idx
+      ON base_assets (base_year, asset_type)
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS forecast_loans (
       id serial PRIMARY KEY,
       asset_type text NOT NULL,

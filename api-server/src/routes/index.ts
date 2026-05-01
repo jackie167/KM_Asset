@@ -10,6 +10,7 @@ import expensesRouter from "./expenses.js";
 import wealthRouter from "./wealth.js";
 import forecastRouter from "./forecast.js";
 import settingsRouter from "./settings.js";
+import baseAssetsRouter from "./baseAssets.js";
 
 const router: IRouter = Router();
 
@@ -22,6 +23,7 @@ router.use(expensesRouter);
 router.use(wealthRouter);
 router.use(forecastRouter);
 router.use(settingsRouter);
+router.use(baseAssetsRouter);
 router.use(pricesRouter);
 router.use(snapshotsRouter);
 

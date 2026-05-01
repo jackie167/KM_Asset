@@ -19,7 +19,7 @@ export default function Home() {
               Asset control center
             </h2>
             <p className="mt-2 text-sm text-muted-foreground max-w-xl">
-              Open Investment for tracked assets, Wealth Allocation for the full current asset sheet,
+              Open Investment for tracked assets, Wealth Allocation for base assets,
               or Excel Sheets for the source workbook.
             </p>
           </div>
@@ -41,7 +41,7 @@ export default function Home() {
                 <p className="text-xs text-muted-foreground uppercase tracking-widest">Page 2</p>
                 <h3 className="mt-2 text-lg font-semibold">Wealth Allocation</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Full current asset sheet grouped by Type.
+                  Base assets grouped by Type.
                 </p>
                 <div className="mt-3 text-xs font-semibold text-primary">Open page →</div>
               </Card>
