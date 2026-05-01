@@ -16,16 +16,24 @@ type AllocationChartProps = {
   holdings: HoldingItem[];
   totalValue: number;
   onTypeSelect?: (type: string) => void;
+  title?: string;
+  groupBy?: (holding: HoldingItem) => string;
 };
 
-export default function AllocationChart({ holdings, totalValue, onTypeSelect }: AllocationChartProps) {
+export default function AllocationChart({
+  holdings,
+  totalValue,
+  onTypeSelect,
+  title = "Asset Allocation",
+  groupBy = (holding) => holding.type.toLowerCase(),
+}: AllocationChartProps) {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   const data = useMemo(() => {
     const typeMap = new Map<string, number>();
     for (const holding of holdings ?? []) {
       if (holding.currentValue == null || holding.currentValue <= 0) continue;
-      const normalizedType = holding.type.toLowerCase();
+      const normalizedType = groupBy(holding).toLowerCase();
       typeMap.set(normalizedType, (typeMap.get(normalizedType) ?? 0) + holding.currentValue);
     }
     const entries = Array.from(typeMap.entries());
@@ -37,14 +45,14 @@ export default function AllocationChart({ holdings, totalValue, onTypeSelect }: 
       pct: totalValue > 0 ? (value / totalValue) * 100 : 0,
       color: PIE_COLORS[index % PIE_COLORS.length],
     }));
-  }, [holdings, totalValue, sortDir]);
+  }, [groupBy, holdings, totalValue, sortDir]);
 
   if (data.length === 0) return null;
 
   return (
     <Card className="p-4 min-w-0 w-full">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs text-muted-foreground uppercase tracking-widest">Asset Allocation</p>
+        <p className="text-xs text-muted-foreground uppercase tracking-widest">{title}</p>
         <div className="flex gap-1">
           <button
             onClick={() => setSortDir("desc")}

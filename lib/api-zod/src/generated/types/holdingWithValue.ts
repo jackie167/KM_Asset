@@ -8,6 +8,7 @@
 
 export interface HoldingWithValue {
   id: number;
+  investmentGroup: string;
   type: string;
   symbol: string;
   quantity: number;

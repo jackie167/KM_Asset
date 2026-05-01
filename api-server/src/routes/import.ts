@@ -278,6 +278,11 @@ function normalizeInvestmentType(rawType: unknown): string {
   return aliases[normalized] ?? normalized ?? "other";
 }
 
+function deriveInvestmentGroup(assetType: string): string {
+  const normalized = assetType.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized === "real_estate" || normalized === "realestate" ? "real_estate" : "financial";
+}
+
 function shouldSyncManualPrice(type: string): boolean {
   return type !== "stock" && type !== "gold" && type !== "crypto";
 }
@@ -522,6 +527,7 @@ async function importInvestmentSyncWorkbook(workbook: XLSX.WorkBook) {
     for (const row of investmentRows) {
       const existing = existingBySymbol.get(row.symbol);
       const values = {
+        investmentGroup: deriveInvestmentGroup(row.type),
         type: row.type,
         quantity: String(row.quantity),
         manualPrice: row.manualPrice != null ? String(row.manualPrice) : null,
@@ -692,7 +698,9 @@ router.post("/holdings/import", upload.single("file"), async (req, res): Promise
       const existing = bySymbol.get(symbol);
 
       if (existing) {
+        const resolvedType = type || existing.type;
         const updateData: Partial<typeof holdingsTable.$inferInsert> & { updatedAt: Date } = {
+          investmentGroup: deriveInvestmentGroup(resolvedType),
           quantity: String(quantity),
           ...(manualPrice !== undefined ? { manualPrice: manualPrice != null ? String(manualPrice) : null } : {}),
           ...(costOfCapital !== undefined ? { costOfCapital: costOfCapital != null ? String(costOfCapital) : null } : {}),
@@ -715,6 +723,7 @@ router.post("/holdings/import", upload.single("file"), async (req, res): Promise
           .insert(holdingsTable)
           .values({
             type: resolvedType,
+            investmentGroup: deriveInvestmentGroup(resolvedType),
             symbol,
             quantity: String(quantity),
             manualPrice: manualPrice != null ? String(manualPrice) : null,

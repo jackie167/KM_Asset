@@ -17,7 +17,7 @@ import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
 import TradeDialog from "@/pages/assets/TradeDialog";
 import TradeOrdersTable, { getTradeNetAmount, type TradeOrder } from "@/pages/assets/TradeOrdersTable";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
-import { formatVND, formatVNDFull } from "@/pages/assets/utils";
+import { deriveInvestmentGroup, formatVND, formatVNDFull } from "@/pages/assets/utils";
 
 const RETURN_INITIAL_AT = new Date("2026-01-01T00:00:00.000Z");
 
@@ -655,6 +655,8 @@ export default function AssetsPage() {
                   <AllocationChart
                     holdings={holdings}
                     totalValue={totalValue}
+                    title="Investment Allocation"
+                    groupBy={(holding) => holding.investmentGroup ?? deriveInvestmentGroup(holding.type)}
                     onTypeSelect={handleOpenAssetType}
                   />
                 )}

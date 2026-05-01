@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const holdingsTable = pgTable("holdings", {
   id: serial("id").primaryKey(),
+  investmentGroup: text("investment_group").notNull().default("financial"),
   type: text("type").notNull(),
   symbol: text("symbol").notNull(),
   quantity: numeric("quantity", { precision: 18, scale: 6 }).notNull(),

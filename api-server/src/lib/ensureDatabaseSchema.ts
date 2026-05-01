@@ -3,8 +3,22 @@ import { pool } from "../../../lib/db/src/index.ts";
 export async function ensureDatabaseSchema() {
   await pool.query(`
     ALTER TABLE holdings
+      ADD COLUMN IF NOT EXISTS investment_group text NOT NULL DEFAULT 'financial',
       ADD COLUMN IF NOT EXISTS cost_of_capital numeric(18, 2),
       ADD COLUMN IF NOT EXISTS interest numeric(18, 2)
+  `);
+
+  await pool.query(`
+    UPDATE holdings
+    SET investment_group = CASE
+      WHEN lower(type) IN ('real_estate', 'real estate', 'realestate') THEN 'real_estate'
+      ELSE 'financial'
+    END
+    WHERE investment_group IS NULL
+      OR investment_group = ''
+      OR investment_group NOT IN ('real_estate', 'financial')
+      OR (lower(type) IN ('real_estate', 'real estate', 'realestate') AND investment_group <> 'real_estate')
+      OR (lower(type) NOT IN ('real_estate', 'real estate', 'realestate') AND investment_group <> 'financial')
   `);
 
   await pool.query(`

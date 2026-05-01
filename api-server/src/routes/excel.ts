@@ -456,6 +456,11 @@ function normalizeInvestmentType(rawType: string | number | boolean | null | und
   return aliases[normalized] ?? normalized ?? "other";
 }
 
+function deriveInvestmentGroup(assetType: string): string {
+  const normalized = assetType.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized === "real_estate" || normalized === "realestate" ? "real_estate" : "financial";
+}
+
 function parseInvestmentRowsFromRaw(rows: unknown[][]): InvestmentRow[] {
 
   const headerIndex = rows.findIndex((row) => {
@@ -907,6 +912,7 @@ router.post("/excel/investment/sync", async (req, res): Promise<void> => {
           await tx
             .update(holdingsTable)
             .set({
+              investmentGroup: deriveInvestmentGroup(row.type),
               type: row.type,
               quantity: String(row.quantity),
               manualPrice: shouldSyncManualPrice(row.type)
@@ -925,6 +931,7 @@ router.post("/excel/investment/sync", async (req, res): Promise<void> => {
 
         await tx.insert(holdingsTable).values({
           symbol: row.symbol,
+          investmentGroup: deriveInvestmentGroup(row.type),
           type: row.type,
           quantity: String(row.quantity),
           manualPrice: shouldSyncManualPrice(row.type)

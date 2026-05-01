@@ -34,6 +34,11 @@ function normalizeHoldingType(type: string): string {
   return type.trim().toLowerCase();
 }
 
+function deriveInvestmentGroup(type: string): string {
+  const normalizedType = normalizeHoldingType(type).replace(/[\s-]+/g, "_");
+  return normalizedType === "real_estate" || normalizedType === "realestate" ? "real_estate" : "financial";
+}
+
 function normalizeSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
@@ -598,6 +603,7 @@ async function getPortfolioCurrentValueSnapshot() {
 
     return {
       id: h.id,
+      investmentGroup: h.investmentGroup || deriveInvestmentGroup(h.type),
       type: h.type,
       symbol: h.symbol,
       quantity: qty,
@@ -796,6 +802,7 @@ router.get("/holdings", async (_req, res): Promise<void> => {
     ListHoldingsResponse.parse(
       holdings.map((h) => ({
         ...h,
+        investmentGroup: h.investmentGroup || deriveInvestmentGroup(h.type),
         quantity: parseFloat(String(h.quantity)),
         manualPrice: h.manualPrice != null ? parseFloat(String(h.manualPrice)) : null,
         costOfCapital: h.costOfCapital != null ? parseFloat(String(h.costOfCapital)) : null,
@@ -819,6 +826,7 @@ router.post("/holdings", async (req, res): Promise<void> => {
     .insert(holdingsTable)
     .values({
       type: parsed.data.type,
+      investmentGroup: deriveInvestmentGroup(parsed.data.type),
       symbol: parsed.data.symbol.toUpperCase(),
       quantity: String(parsed.data.quantity),
       manualPrice: parsed.data.manualPrice != null ? String(parsed.data.manualPrice) : null,
@@ -855,6 +863,7 @@ router.put("/holdings/:id", async (req, res): Promise<void> => {
     .update(holdingsTable)
     .set({
       type: parsed.data.type,
+      investmentGroup: deriveInvestmentGroup(parsed.data.type),
       quantity: String(parsed.data.quantity),
       manualPrice: parsed.data.manualPrice != null ? String(parsed.data.manualPrice) : null,
       updatedAt: new Date(),
@@ -1140,7 +1149,7 @@ async function adjustCashHolding(delta: number): Promise<void> {
 
   if (!cashHolding) {
     if (delta > 0) {
-      await db.insert(holdingsTable).values({ symbol: "CASH", type: "cash", quantity: "1", manualPrice: String(delta), costOfCapital: String(delta) });
+      await db.insert(holdingsTable).values({ symbol: "CASH", investmentGroup: "financial", type: "cash", quantity: "1", manualPrice: String(delta), costOfCapital: String(delta) });
     }
     return;
   }
@@ -1202,6 +1211,7 @@ router.post("/portfolio/cash-flows/recalculate", async (_req, res): Promise<void
   } else {
     const [created] = await db.insert(holdingsTable).values({
       symbol: "CASH",
+      investmentGroup: "financial",
       type: "cash",
       quantity: "1",
       manualPrice: String(newPrice),

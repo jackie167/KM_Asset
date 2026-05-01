@@ -3,11 +3,12 @@ import { Link, useLocation, useRoute } from "wouter";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { usePortfolioData, usePortfolioMutations } from "@/hooks/use-portfolio";
+import AllocationChart from "@/pages/assets/AllocationChart";
 import HoldingsTable from "@/pages/assets/HoldingsTable";
 import PerformanceChart from "@/pages/assets/PerformanceChart";
 import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
-import { formatVND, formatVNDFull, formatTypeLabel } from "@/pages/assets/utils";
+import { deriveInvestmentGroup, formatVND, formatVNDFull, formatTypeLabel } from "@/pages/assets/utils";
 
 type RouteParams = {
   type: string;
@@ -31,10 +32,14 @@ export default function AssetTypePage() {
   );
 
   const normalizedType = (params?.type ?? "").toLowerCase();
+  const isInvestmentGroupPage = normalizedType === "financial" || normalizedType === "real_estate";
   const holdings: HoldingItem[] = (summary?.holdings ?? holdingsFromApi) as HoldingItem[];
   const typeHoldings = useMemo(
-    () => holdings.filter((holding) => holding.type.toLowerCase() === normalizedType),
-    [holdings, normalizedType]
+    () => holdings.filter((holding) => {
+      const group = holding.investmentGroup ?? deriveInvestmentGroup(holding.type);
+      return isInvestmentGroupPage ? group.toLowerCase() === normalizedType : holding.type.toLowerCase() === normalizedType;
+    }),
+    [holdings, isInvestmentGroupPage, normalizedType]
   );
 
   const sortedHoldings = useMemo(() => {
@@ -55,8 +60,11 @@ export default function AssetTypePage() {
     const points = [...(snapshots || [])]
       .sort((a, b) => new Date(a.snapshotAt).getTime() - new Date(b.snapshotAt).getTime())
       .map((snapshot) => {
-        const value =
-          snapshot.typeValues?.[normalizedType] ??
+        const value = isInvestmentGroupPage
+          ? Object.entries(snapshot.typeValues ?? {}).reduce((sum, [type, typeValue]) => {
+              return deriveInvestmentGroup(type) === normalizedType ? sum + typeValue : sum;
+            }, 0)
+          : snapshot.typeValues?.[normalizedType] ??
           (normalizedType === "stock"
             ? snapshot.stockValue
             : normalizedType === "gold"
@@ -75,7 +83,7 @@ export default function AssetTypePage() {
       .filter((point): point is ChartPoint => point !== null);
 
     return points;
-  }, [normalizedType, snapshots]);
+  }, [isInvestmentGroupPage, normalizedType, snapshots]);
 
   const supportsHistoricalChart = typeHoldings.length > 0;
   const typeLabel = normalizedType ? formatTypeLabel(normalizedType) : "Asset Type";
@@ -148,6 +156,10 @@ export default function AssetTypePage() {
     link.download = `danh-muc-${normalizedType}-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleOpenDetailType = (type: string) => {
+    navigate(`/assets/type/${encodeURIComponent(type)}`);
   };
 
   const sortLabel =
@@ -238,6 +250,15 @@ export default function AssetTypePage() {
                   : "No separate history is available for this asset type yet."
               }
             />
+
+            {isInvestmentGroupPage && typeHoldings.length > 0 && (
+              <AllocationChart
+                holdings={typeHoldings}
+                totalValue={totalValue}
+                title="Detail Allocation"
+                onTypeSelect={handleOpenDetailType}
+              />
+            )}
 
             <HoldingsTable
               holdings={typeHoldings}

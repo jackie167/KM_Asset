@@ -20,6 +20,7 @@ export const HealthCheckResponse = zod.object({
  */
 export const ListHoldingsResponseItem = zod.object({
   id: zod.number(),
+  investmentGroup: zod.string(),
   type: zod.string(),
   symbol: zod.string(),
   quantity: zod.number(),
@@ -82,6 +83,7 @@ export const UpdateHoldingBody = zod.object({
 
 export const UpdateHoldingResponse = zod.object({
   id: zod.number(),
+  investmentGroup: zod.string(),
   type: zod.string(),
   symbol: zod.string(),
   quantity: zod.number(),
@@ -146,6 +148,7 @@ export const GetPortfolioSummaryResponse = zod.object({
   holdings: zod.array(
     zod.object({
       id: zod.number(),
+      investmentGroup: zod.string(),
       type: zod.string(),
       symbol: zod.string(),
       quantity: zod.number(),

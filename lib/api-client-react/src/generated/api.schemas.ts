@@ -15,6 +15,7 @@ export interface ErrorResponse {
 
 export interface Holding {
   id: number;
+  investmentGroup: string;
   type: string;
   symbol: string;
   quantity: number;
@@ -76,6 +77,7 @@ export interface ImportResult {
 
 export interface HoldingWithValue {
   id: number;
+  investmentGroup: string;
   type: string;
   symbol: string;
   quantity: number;

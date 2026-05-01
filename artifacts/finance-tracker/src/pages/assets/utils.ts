@@ -70,3 +70,8 @@ export function formatTypeLabel(type: string) {
 export function formatTypeShortLabel(type: string) {
   return getTypeMeta(type).shortLabel;
 }
+
+export function deriveInvestmentGroup(type: string) {
+  const normalizedType = type.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalizedType === "real_estate" || normalizedType === "realestate" ? "real_estate" : "financial";
+}

@@ -77,6 +77,11 @@ function usesManualPortfolioValue(assetType: string): boolean {
   return normalized !== "stock" && normalized !== "gold" && normalized !== "crypto";
 }
 
+function deriveInvestmentGroup(assetType: string): string {
+  const normalized = assetType.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized === "real_estate" || normalized === "realestate" ? "real_estate" : "financial";
+}
+
 function normalizeTradeQuantity(input: { assetType: string; quantity?: number }): number {
   if (usesManualPortfolioValue(input.assetType)) {
     return 1;
@@ -129,6 +134,7 @@ async function adjustCash(tx: any, delta: number) {
   const cash = await getHoldingBySymbol(tx, "CASH");
   if (!cash) {
     await tx.insert(holdingsTable).values({
+      investmentGroup: "financial",
       type: "cash",
       symbol: "CASH",
       quantity: "1",
@@ -163,6 +169,7 @@ async function increaseAsset(tx: any, input: {
   const holding = await getHoldingBySymbol(tx, input.symbol);
   if (!holding) {
     await tx.insert(holdingsTable).values({
+      investmentGroup: deriveInvestmentGroup(input.assetType),
       type: input.assetType,
       symbol,
       quantity: String(usesManualValue ? 1 : input.quantity),
@@ -180,6 +187,7 @@ async function increaseAsset(tx: any, input: {
     .update(holdingsTable)
     .set({
       type: nextType,
+      investmentGroup: deriveInvestmentGroup(nextType),
       quantity: String(nextUsesManualValue ? 1 : toNumber(holding.quantity) + input.quantity),
       manualPrice: nextUsesManualValue
         ? String(toNumber(holding.manualPrice) + (input.valueIncrease ?? input.costIncrease))
