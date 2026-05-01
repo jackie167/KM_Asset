@@ -448,7 +448,7 @@ export default function FirePlanningPage() {
             </div>
 
             {/* Passive income vs spend */}
-            <div className="grid md:grid-cols-2 gap-4 pt-2 border-t border-border/40">
+            <div className="grid sm:grid-cols-2 gap-4 pt-2 border-t border-border/40">
               <div className="space-y-1">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Thu nhập thụ động / tháng</p>
                 <p className={`text-xl font-bold tabular-nums ${freedomRatio != null && freedomRatio >= 1 ? "text-emerald-400" : "text-foreground"}`}>

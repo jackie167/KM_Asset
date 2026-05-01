@@ -194,7 +194,7 @@ export default function WealthAllocationTypePage() {
             />
 
             {(totalValue > 0 || typeHoldings.length > 0) && (
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 {totalValue > 0 && (
                   <AllocationChart
                     holdings={typeHoldings}
