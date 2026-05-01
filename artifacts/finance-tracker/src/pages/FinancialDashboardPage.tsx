@@ -6,8 +6,8 @@ import PageHeader from "@/pages/PageHeader";
 import { Card } from "@/components/ui/card";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { fetchIncomeExpenseCashflowData } from "@/lib/asset-forecast";
-import { buildForecastLoanSchedule, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
+import { fetchForecastTrades, fetchIncomeExpenseCashflowData } from "@/lib/asset-forecast";
+import { buildForecastLoanEventsWithTradeSettlements, buildForecastLoanSchedule, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -245,6 +245,7 @@ export default function FinancialDashboardPage() {
   const cashflowQuery = useQuery({ queryKey: ["income-expense-cashflow", new Date().getFullYear()], queryFn: () => fetchIncomeExpenseCashflowData() });
   const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
   const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
+  const forecastTradesQuery = useQuery({ queryKey: ["asset-forecast-trades"], queryFn: fetchForecastTrades });
 
   // ── derived values ─────────────────────────────────────────────────────────
 
@@ -295,13 +296,19 @@ export default function FinancialDashboardPage() {
   const pnlPct = pctOf(pnl, costTotal);
   const xirrAnnual = xirrQuery.data?.xirrAnnual ?? null;
   const forecastDebt = useMemo(() => (
-    getForecastDebtForYear(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [])
-  ), [forecastLoanEventsQuery.data, forecastLoansQuery.data]);
+    getForecastDebtForYear(
+      forecastLoansQuery.data ?? [],
+      buildForecastLoanEventsWithTradeSettlements(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [], forecastTradesQuery.data ?? [])
+    )
+  ), [forecastLoanEventsQuery.data, forecastLoansQuery.data, forecastTradesQuery.data]);
   const forecastLoanInterest = useMemo(() => {
     const currentYear = new Date().getFullYear();
-    return buildForecastLoanSchedule(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [])
+    return buildForecastLoanSchedule(
+      forecastLoansQuery.data ?? [],
+      buildForecastLoanEventsWithTradeSettlements(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [], forecastTradesQuery.data ?? [])
+    )
       .find((row) => row.year === currentYear)?.interest ?? 0;
-  }, [forecastLoanEventsQuery.data, forecastLoansQuery.data]);
+  }, [forecastLoanEventsQuery.data, forecastLoansQuery.data, forecastTradesQuery.data]);
   const forecastDebtRatio = pctOf(forecastDebt, netWorth);
   const forecastInterestBurden = cashflowQuery.data?.income ? forecastLoanInterest / cashflowQuery.data.income : null;
   const debtLoading = forecastLoansQuery.isLoading || forecastLoanEventsQuery.isLoading;

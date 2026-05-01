@@ -5,7 +5,7 @@ import PageHeader from "@/pages/PageHeader";
 import type { HoldingItem } from "@/pages/assets/types";
 import { formatVNDFull } from "@/pages/assets/utils";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
-import { fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
+import { buildForecastLoanEventsWithTradeSettlements, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import {
   INVEST_TYPES, DEFAULT_RATES, DEFAULT_ALLOCATION_RATIOS,
   DB_KEYS, readJsonRecord, parsePercentInput,
@@ -215,9 +215,12 @@ export default function FirePlanningPage() {
   const wealthNetAsset = useMemo(() => {
     const holdings = wealthQuery.data ?? [];
     const total = holdings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
-    const debt = getForecastDebtForYear(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? []);
+    const debt = getForecastDebtForYear(
+      forecastLoansQuery.data ?? [],
+      buildForecastLoanEventsWithTradeSettlements(forecastLoansQuery.data ?? [], forecastLoanEventsQuery.data ?? [], forecastTradesQuery.data ?? [])
+    );
     return total - debt;
-  }, [forecastLoanEventsQuery.data, forecastLoansQuery.data, wealthQuery.data]);
+  }, [forecastLoanEventsQuery.data, forecastLoansQuery.data, forecastTradesQuery.data, wealthQuery.data]);
 
   const fireAssets = fireAssetMode === "networth" ? wealthNetAsset : financialAssets;
 

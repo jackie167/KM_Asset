@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
 import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
-import { fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
+import { fetchForecastTrades } from "@/lib/asset-forecast";
+import { buildForecastLoanEventsWithTradeSettlements, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import { useToast } from "@/hooks/use-toast";
 
 export default function WealthAllocationPage() {
@@ -36,13 +37,17 @@ export default function WealthAllocationPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [wealthHoldings, totalAssetData, latestSnapshot] = await Promise.all([
+      const [wealthHoldings, totalAssetData, forecastTrades, latestSnapshot] = await Promise.all([
         fetchWealthAllocationHoldings(),
         Promise.all([fetchForecastLoans(), fetchForecastLoanEvents()]),
+        fetchForecastTrades(),
         fetch("/api/wealth/snapshots/latest").then((r) => r.ok ? r.json() : null).catch(() => null),
       ]);
       setHoldings(wealthHoldings);
-      setDebt(getForecastDebtForYear(totalAssetData[0], totalAssetData[1]));
+      setDebt(getForecastDebtForYear(
+        totalAssetData[0],
+        buildForecastLoanEventsWithTradeSettlements(totalAssetData[0], totalAssetData[1], forecastTrades)
+      ));
       if (latestSnapshot) setLastSavedAt(latestSnapshot.snapshotAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load wealth allocation.");

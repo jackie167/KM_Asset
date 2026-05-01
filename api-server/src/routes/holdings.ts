@@ -5,6 +5,8 @@ import {
   appSettingsTable,
   baseAssetsTable,
   db,
+  forecastLoanEventsTable,
+  forecastLoansTable,
   forecastTradesTable,
   holdingsTable,
   portfolioCashFlowsTable,
@@ -38,6 +40,16 @@ function normalizeSymbol(symbol: string): string {
 
 function fixedAssetKey(type: string, symbol: string): string {
   return `${normalizeHoldingType(type)}::${normalizeSymbol(symbol)}`;
+}
+
+function normalizeAssetMatcher(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function usesManualPortfolioValue(type: string): boolean {
@@ -266,12 +278,104 @@ function forecastTradeCashDelta(trade: typeof forecastTradesTable.$inferSelect):
   return Number.isFinite(amount) ? amount : 0;
 }
 
+type ForecastLoanRuntime = {
+  id: number;
+  assetSymbol: string;
+  principalStart: number;
+  startYear: number;
+  endYear: number | null;
+  status: string;
+  settleOnAssetSell: boolean;
+  repaymentType: string;
+  annualPrincipalPayment: number;
+};
+
+function buildExecutedTradeNetCashById(input: {
+  loans: ForecastLoanRuntime[];
+  events: Array<typeof forecastLoanEventsTable.$inferSelect>;
+  trades: Array<typeof forecastTradesTable.$inferSelect>;
+}) {
+  const eventsByLoanYear = new Map<string, Array<typeof forecastLoanEventsTable.$inferSelect>>();
+  for (const event of input.events) {
+    const key = `${event.loanId}::${event.year}`;
+    eventsByLoanYear.set(key, [...(eventsByLoanYear.get(key) ?? []), event]);
+  }
+
+  const loanState = new Map(input.loans.map((loan) => [loan.id, loan.principalStart]));
+  const result = new Map<number, number>();
+  const currentYear = new Date().getFullYear();
+
+  for (let year = 2026; year <= currentYear; year += 1) {
+    const loanDebtById = new Map<number, number>();
+
+    for (const loan of input.loans) {
+      const starts = year >= loan.startYear;
+      const ended = loan.endYear != null && year > loan.endYear;
+      if (!starts || ended || loan.status === "settled") {
+        loanDebtById.set(loan.id, 0);
+        continue;
+      }
+
+      const openingDebt = loanState.get(loan.id) ?? loan.principalStart;
+      const loanEvents = eventsByLoanYear.get(`${loan.id}::${year}`) ?? [];
+      const drawdown = loanEvents
+        .filter((event) => event.eventType === "drawdown")
+        .reduce((sum, event) => sum + parseFloat(String(event.amount)), 0);
+      const eventPrincipal = loanEvents
+        .filter((event) => event.eventType === "principal_payment")
+        .reduce((sum, event) => sum + parseFloat(String(event.amount)), 0);
+      const eventSettlement = loanEvents
+        .filter((event) => event.eventType === "settlement")
+        .reduce((sum, event) => sum + parseFloat(String(event.amount)), 0);
+      const scheduledPrincipal = loan.repaymentType === "custom" ? 0 : loan.annualPrincipalPayment;
+      const debtBeforePayment = Math.max(0, openingDebt + drawdown);
+      const paidPrincipal = Math.min(debtBeforePayment, scheduledPrincipal + eventPrincipal + eventSettlement);
+      loanDebtById.set(loan.id, Math.max(0, debtBeforePayment - paidPrincipal));
+    }
+
+    const sellTrades = input.trades
+      .filter((trade) => trade.year === year && trade.side === "sell" && !isFinancialForecastAsset(trade.assetType, trade.symbol))
+      .sort((left, right) => left.id - right.id);
+
+    for (const trade of sellTrades) {
+      const saleAmount = parseFloat(String(trade.amount));
+      let remainingCash = Number.isFinite(saleAmount) ? Math.max(0, saleAmount) : 0;
+      const tradeAsset = normalizeAssetMatcher(trade.symbol);
+      const matchedLoans = input.loans.filter((loan) =>
+        loan.status === "active" &&
+        loan.settleOnAssetSell &&
+        normalizeAssetMatcher(loan.assetSymbol) === tradeAsset
+      );
+
+      for (const loan of matchedLoans) {
+        if (remainingCash <= 0) break;
+        const outstandingDebt = loanDebtById.get(loan.id) ?? 0;
+        const settlement = Math.min(remainingCash, outstandingDebt);
+        if (settlement <= 0) continue;
+        remainingCash -= settlement;
+        loanDebtById.set(loan.id, Math.max(0, outstandingDebt - settlement));
+      }
+
+      if (isExecutedForecastTrade(trade)) {
+        result.set(trade.id, remainingCash);
+      }
+    }
+
+    for (const loan of input.loans) {
+      loanState.set(loan.id, loanDebtById.get(loan.id) ?? 0);
+    }
+  }
+
+  return result;
+}
+
 function calculateForecastCashValue(input: {
   baseValue: number;
   annualRate: number;
   cashFlows: Array<typeof portfolioCashFlowsTable.$inferSelect>;
   transactions: Array<typeof transactionsTable.$inferSelect>;
   forecastTrades: Array<typeof forecastTradesTable.$inferSelect>;
+  executedTradeNetCashById: Map<number, number>;
   now?: Date;
 }): number {
   const now = input.now ?? new Date();
@@ -294,7 +398,7 @@ function calculateForecastCashValue(input: {
     }, 0);
     const forecastTradeDeltaForMonth = input.forecastTrades.reduce((sum, trade) => {
       if (trade.createdAt < periodStart || trade.createdAt >= periodEnd) return sum;
-      return sum + forecastTradeCashDelta(trade);
+      return sum + (input.executedTradeNetCashById.get(trade.id) ?? forecastTradeCashDelta(trade));
     }, 0);
 
     balance = Math.max(0, balance + cashFlowDeltaForMonth + tradeDeltaForMonth + forecastTradeDeltaForMonth);
@@ -312,7 +416,7 @@ function calculateForecastCashValue(input: {
   }, 0);
   const currentMonthForecastTradeDelta = input.forecastTrades.reduce((sum, trade) => {
     if (trade.createdAt < cutoff || trade.createdAt > now) return sum;
-    return sum + forecastTradeCashDelta(trade);
+    return sum + (input.executedTradeNetCashById.get(trade.id) ?? forecastTradeCashDelta(trade));
   }, 0);
   balance = Math.max(0, balance + currentMonthCashFlowDelta + currentMonthTradeDelta + currentMonthForecastTradeDelta);
 
@@ -327,6 +431,8 @@ async function getPortfolioCurrentValueSnapshot() {
     assetReturnSettingRows,
     investmentReturnSettingRows,
     currentYearForecastTrades,
+    forecastLoans,
+    forecastLoanEvents,
     portfolioCashFlows,
     portfolioTransactions,
   ] = await Promise.all([
@@ -336,6 +442,8 @@ async function getPortfolioCurrentValueSnapshot() {
     db.select().from(appSettingsTable).where(eq(appSettingsTable.key, ASSET_RETURN_SETTING_KEY)).limit(1),
     db.select().from(appSettingsTable).where(eq(appSettingsTable.key, INVESTMENT_RETURN_SETTING_KEY)).limit(1),
     db.select().from(forecastTradesTable).where(eq(forecastTradesTable.year, new Date().getFullYear())),
+    db.select().from(forecastLoansTable),
+    db.select().from(forecastLoanEventsTable),
     db.select().from(portfolioCashFlowsTable).where(gte(portfolioCashFlowsTable.occurredAt, STOCK_RETURN_INITIAL_AT)),
     db.select().from(transactionsTable).where(gte(transactionsTable.executedAt, STOCK_RETURN_INITIAL_AT)),
   ]);
@@ -343,6 +451,21 @@ async function getPortfolioCurrentValueSnapshot() {
   const assetReturnInputs = parseJsonRecord(assetReturnSettingRows[0]?.value);
   const investmentReturnInputs = parseJsonRecord(investmentReturnSettingRows[0]?.value);
   const cashAnnualRate = parsePercentSetting(investmentReturnInputs["cash"] ?? "4");
+  const executedTradeNetCashById = buildExecutedTradeNetCashById({
+    loans: forecastLoans.map((loan) => ({
+      id: loan.id,
+      assetSymbol: loan.assetSymbol,
+      principalStart: parseFloat(String(loan.principalStart)),
+      startYear: loan.startYear,
+      endYear: loan.endYear,
+      status: loan.status,
+      settleOnAssetSell: loan.settleOnAssetSell,
+      repaymentType: loan.repaymentType,
+      annualPrincipalPayment: parseFloat(String(loan.annualPrincipalPayment)),
+    })),
+    events: forecastLoanEvents,
+    trades: currentYearForecastTrades,
+  });
 
   const baseAssetByKey = new Map(baseAssets.map((asset) => [fixedAssetKey(asset.assetType, asset.symbol), asset]));
   const forecastTradeAdjustmentByKey = new Map<string, number>();
@@ -397,6 +520,7 @@ async function getPortfolioCurrentValueSnapshot() {
           cashFlows: portfolioCashFlows,
           transactions: portfolioTransactions,
           forecastTrades: currentYearForecastTrades,
+          executedTradeNetCashById,
         })
       : null;
     const fixedAssetCurrentValue = fixedAsset
