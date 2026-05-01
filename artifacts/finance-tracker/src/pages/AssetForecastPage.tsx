@@ -124,6 +124,10 @@ function normalizeAssetMatcher(value: string) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function elapsedMonthsFromBaseYear(baseYear = 2026, now = new Date()) {
+  return Math.max(0, (now.getFullYear() - baseYear) * 12 + now.getMonth());
+}
+
 export default function AssetForecastPage() {
   const queryClient = useQueryClient();
   const returnRateInput = LS.get("asset_forecast_return_rate", "8");
@@ -265,6 +269,7 @@ export default function AssetForecastPage() {
   }, [assetReturnInputs, currentAssetRows, forecastTrades, returnRateInput]);
 
   const selectedTradeYear = FORECAST_YEARS.includes(Number(tradeYear)) ? Number(tradeYear) : 2026;
+  const currentYear = new Date().getFullYear();
 
   const tradeDialogFixedStartByKey = useMemo(() => {
     const values = fixedAssetRows.map((row) => ({ ...row }));
@@ -306,7 +311,22 @@ export default function AssetForecastPage() {
   // Only fixed (non-investment) assets can be sold via trade dialog.
   const tradeAssetOptions = useMemo(() =>
     fixedAssetRows.map((row) => {
-      const forecastStartValue = tradeDialogFixedStartByKey.get(row.key) ?? row.startValue;
+      const isCurrentYearTrade = selectedTradeYear === currentYear;
+      const currentMonthValue = row.startValue * ((1 + row.returnRate) ** (elapsedMonthsFromBaseYear(2026) / 12));
+      const boughtByOtherTrades = isCurrentYearTrade
+        ? forecastTrades
+          .filter((trade) =>
+            trade.id !== editingTrade?.id &&
+            trade.side === "buy" &&
+            trade.year === selectedTradeYear &&
+            !getTradeInvestmentType(trade) &&
+            fixedTradeKey(trade.assetType, trade.symbol) === row.key
+          )
+          .reduce((sum, trade) => sum + trade.amount, 0)
+        : 0;
+      const forecastStartValue = isCurrentYearTrade
+        ? currentMonthValue + boughtByOtherTrades
+        : tradeDialogFixedStartByKey.get(row.key) ?? row.startValue;
       const soldByOtherTrades = forecastTrades
         .filter((trade) =>
           trade.id !== editingTrade?.id &&
@@ -327,7 +347,7 @@ export default function AssetForecastPage() {
         currentValue: Math.max(0, forecastStartValue - soldByOtherTrades),
       };
     })
-  , [editingTrade?.id, fixedAssetRows, forecastTrades, selectedTradeYear, tradeDialogFixedStartByKey]);
+  , [currentYear, editingTrade?.id, fixedAssetRows, forecastTrades, selectedTradeYear, tradeDialogFixedStartByKey]);
 
   const buyAssetTypeOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -1740,7 +1760,9 @@ export default function AssetForecastPage() {
 
                 {selectedTradeOption && (
                   <div className="rounded-md bg-muted/30 px-3 py-2 text-xs space-y-0.5">
-                    <p className="text-muted-foreground">Giá trị đầu năm {selectedTradeYear} theo forecast</p>
+                    <p className="text-muted-foreground">
+                      {selectedTradeYear === currentYear ? "Giá trị current theo đầu tháng" : `Giá trị đầu năm ${selectedTradeYear} theo forecast`}
+                    </p>
                     <p className="font-semibold tabular-nums">{formatVNDFull(selectedTradeOption.forecastStartValue)}</p>
                     {selectedTradeOption.soldByOtherTrades > 0 && (
                       <p className="text-[10px] text-muted-foreground">

@@ -5,6 +5,16 @@ export const CURRENT_ASSET_SHEET = "Current asset";
 const FINANCIAL_TYPES = new Set(["financial"]);
 const REAL_ESTATE_TYPES = new Set(["real_estate", "realestate", "real estate"]);
 const ASSET_RETURN_SETTING_KEY = "asset_forecast_asset_returns";
+const FINANCIAL_TRADE_TYPES = new Set(["cash", "stock", "gold", "fund", "crypto"]);
+
+type ForecastTrade = {
+  id: number;
+  side: "buy" | "sell";
+  year: number;
+  assetType: string;
+  symbol: string;
+  amount: number;
+};
 
 async function readJsonSafe(res: Response) {
   const contentType = res.headers.get("content-type") || "";
@@ -49,6 +59,15 @@ function fixedAssetReturnKey(holding: HoldingItem) {
   return `${holding.type.trim().toLowerCase()}::${holding.symbol.trim().toUpperCase()}`;
 }
 
+function fixedTradeKey(assetType: string, symbol: string) {
+  return `${assetType.trim().toLowerCase()}::${symbol.trim().toUpperCase()}`;
+}
+
+function isFinancialTrade(trade: Pick<ForecastTrade, "assetType" | "symbol">) {
+  return FINANCIAL_TRADE_TYPES.has(trade.assetType.trim().toLowerCase()) ||
+    FINANCIAL_TRADE_TYPES.has(trade.symbol.trim().toLowerCase());
+}
+
 function elapsedMonthsFromBaseYear(baseYear = 2026, now = new Date()) {
   return Math.max(0, (now.getFullYear() - baseYear) * 12 + now.getMonth());
 }
@@ -81,6 +100,41 @@ function applyMonthlyForecastValue(holding: HoldingItem, returnInputs: Record<st
     currentValue,
     manualPrice: currentValue,
   };
+}
+
+async function fetchForecastTrades(): Promise<ForecastTrade[]> {
+  const res = await fetch("/api/asset-forecast/trades");
+  if (!res.ok) return [];
+  return res.json();
+}
+
+function applyCurrentYearTrades(holdings: HoldingItem[], trades: ForecastTrade[]) {
+  const currentYear = new Date().getFullYear();
+  const byKey = new Map(holdings.map((holding) => [fixedAssetReturnKey(holding), { ...holding }]));
+
+  for (const trade of trades) {
+    if (trade.year !== currentYear || isFinancialTrade(trade)) continue;
+    const key = fixedTradeKey(trade.assetType, trade.symbol);
+    const existing = byKey.get(key);
+    const currentValue = existing?.currentValue ?? 0;
+    const nextValue = trade.side === "buy"
+      ? currentValue + trade.amount
+      : Math.max(0, currentValue - trade.amount);
+
+    byKey.set(key, {
+      id: existing?.id ?? -trade.id,
+      symbol: existing?.symbol ?? trade.symbol,
+      type: existing?.type ?? normalizeWealthType(trade.assetType),
+      quantity: 1,
+      currentPrice: nextValue,
+      currentValue: nextValue,
+      change: null,
+      changePercent: null,
+      manualPrice: nextValue,
+    });
+  }
+
+  return Array.from(byKey.values()).filter((holding) => (holding.currentValue ?? 0) > 0);
 }
 
 function findColumn(headers: unknown[], aliases: string[]) {
@@ -216,17 +270,19 @@ export async function fetchFinancialDetailHoldings(): Promise<HoldingItem[]> {
 }
 
 export async function fetchWealthAllocationHoldings() {
-  const [baseHoldings, investmentHoldings, returnInputs] = await Promise.all([
+  const [baseHoldings, investmentHoldings, returnInputs, forecastTrades] = await Promise.all([
     fetchBaseAssetHoldings(),
     fetchPortfolioInvestmentHoldings(),
     fetchAssetReturnInputs(),
+    fetchForecastTrades(),
   ]);
 
   const sheetHoldings = baseHoldings
     .filter((holding) => !FINANCIAL_TYPES.has(holding.type))
     .map((holding) => applyMonthlyForecastValue(holding, returnInputs));
+  const currentFixedHoldings = applyCurrentYearTrades(sheetHoldings, forecastTrades);
 
-  if (investmentHoldings.length === 0) return sheetHoldings;
+  if (investmentHoldings.length === 0) return currentFixedHoldings;
 
   const financialTotal = investmentHoldings.reduce((sum, h) => sum + (h.currentValue ?? 0), 0);
   const financialHolding: HoldingItem = {
@@ -241,5 +297,5 @@ export async function fetchWealthAllocationHoldings() {
     manualPrice: financialTotal,
   };
 
-  return [...sheetHoldings, financialHolding];
+  return [...currentFixedHoldings, financialHolding];
 }
