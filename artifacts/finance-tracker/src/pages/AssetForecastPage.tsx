@@ -143,6 +143,7 @@ export default function AssetForecastPage() {
   const [tradeYear, setTradeYear] = useState("2026");
   const [tradeAssetKey, setTradeAssetKey] = useState("");
   const [tradeBuyAssetType, setTradeBuyAssetType] = useState("Real Estate");
+  const [tradeBuyAssetTypeMode, setTradeBuyAssetTypeMode] = useState<"existing" | "new">("existing");
   const [tradeBuySymbol, setTradeBuySymbol] = useState("");
   const [tradeAmount, setTradeAmount] = useState("");
   const [tradeLoanRatio, setTradeLoanRatio] = useState("0");
@@ -328,6 +329,20 @@ export default function AssetForecastPage() {
       };
     })
   , [editingTrade?.id, fixedAssetRows, forecastTrades, selectedTradeYear, tradeDialogFixedStartByKey]);
+
+  const buyAssetTypeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const row of fixedAssetRows) {
+      const type = row.type.trim();
+      const key = normalizeAssetMatcher(type);
+      if (!type || seen.has(key)) continue;
+      seen.add(key);
+      result.push(type);
+    }
+    if (result.length === 0) return ["Real Estate", "Business"];
+    return result.sort((a, b) => a.localeCompare(b));
+  }, [fixedAssetRows]);
 
   const fixedSellByYearAndKey = useMemo(() => {
     const result = new Map<string, number>();
@@ -647,6 +662,7 @@ export default function AssetForecastPage() {
     setTradeSide("sell");
     setTradeAmount("");
     setTradeBuyAssetType("Real Estate");
+    setTradeBuyAssetTypeMode("existing");
     setTradeBuySymbol("");
     setTradeLoanRatio("0");
     setTradeLoanRate("0");
@@ -702,7 +718,8 @@ export default function AssetForecastPage() {
     setTradeSide("sell");
     setTradeYear("2026");
     setTradeAssetKey((current) => current || tradeAssetOptions[0]?.key || "");
-    setTradeBuyAssetType("Real Estate");
+    setTradeBuyAssetType(buyAssetTypeOptions[0] ?? "Real Estate");
+    setTradeBuyAssetTypeMode("existing");
     setTradeBuySymbol("");
     setTradeAmount("");
     setTradeLoanRatio("0");
@@ -722,6 +739,7 @@ export default function AssetForecastPage() {
     const assetKey = `fixed::${fixedTradeKey(trade.assetType, trade.symbol)}`;
     setTradeAssetKey(assetKey);
     setTradeBuyAssetType(trade.assetType);
+    setTradeBuyAssetTypeMode(buyAssetTypeOptions.some((type) => normalizeAssetMatcher(type) === normalizeAssetMatcher(trade.assetType)) ? "existing" : "new");
     setTradeBuySymbol(trade.symbol);
     setTradeAmount(String(trade.amount));
     setTradeLoanRatio(String((trade.loanRatio ?? 0) * 100));
@@ -1737,12 +1755,32 @@ export default function AssetForecastPage() {
               <div className="grid grid-cols-2 gap-3">
                 <label className="space-y-1.5 text-xs">
                   <span className="text-muted-foreground">Asset type</span>
-                  <Input
-                    value={tradeBuyAssetType}
-                    onChange={(event) => setTradeBuyAssetType(event.target.value)}
-                    placeholder="Real Estate"
-                    className="h-9 text-xs"
-                  />
+                  <select
+                    value={tradeBuyAssetTypeMode === "new" ? "__new__" : tradeBuyAssetType}
+                    onChange={(event) => {
+                      if (event.target.value === "__new__") {
+                        setTradeBuyAssetTypeMode("new");
+                        setTradeBuyAssetType("");
+                      } else {
+                        setTradeBuyAssetTypeMode("existing");
+                        setTradeBuyAssetType(event.target.value);
+                      }
+                    }}
+                    className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {buyAssetTypeOptions.map((type) => (
+                      <option key={type} value={type}>{formatTypeLabel(type)}</option>
+                    ))}
+                    <option value="__new__">Tạo mới</option>
+                  </select>
+                  {tradeBuyAssetTypeMode === "new" && (
+                    <Input
+                      value={tradeBuyAssetType}
+                      onChange={(event) => setTradeBuyAssetType(event.target.value)}
+                      placeholder="Nhập danh mục mới"
+                      className="h-9 text-xs"
+                    />
+                  )}
                 </label>
                 <label className="space-y-1.5 text-xs">
                   <span className="text-muted-foreground">Asset name</span>
