@@ -8,7 +8,7 @@ import type { HoldingItem } from "@/pages/assets/types";
 import { formatVND, formatVNDFull } from "@/pages/assets/utils";
 import { fetchForecastTrades, fetchIncomeExpenseCashflowData } from "@/lib/asset-forecast";
 import { buildForecastLoanEventsWithTradeSettlements, buildForecastLoanSchedule, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
-import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
+import { fetchBaseAssetHoldings, fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,10 @@ function normalizeSymbol(symbol: string) {
 
 function isCashHolding(holding: Pick<HoldingItem, "type" | "symbol">) {
   return normalizeAssetType(holding.type) === "cash" || normalizeSymbol(holding.symbol) === "CASH";
+}
+
+function isFinancialHolding(holding: Pick<HoldingItem, "type" | "symbol">) {
+  return normalizeAssetType(holding.type) === "financial" || normalizeSymbol(holding.symbol) === "FINANCIAL";
 }
 
 type DashboardTransaction = {
@@ -154,6 +158,7 @@ function StatCard({
   label,
   value,
   sub,
+  subTone = "neutral",
   tone: t = "neutral",
   loading = false,
   href,
@@ -161,6 +166,7 @@ function StatCard({
   label: string;
   value: string;
   sub?: string;
+  subTone?: Tone;
   tone?: Tone;
   loading?: boolean;
   href?: string;
@@ -173,7 +179,7 @@ function StatCard({
       ) : (
         <p className={`text-base md:text-xl font-bold tabular-nums break-all leading-snug ${TONE_CLASS[t]}`}>{value}</p>
       )}
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+      {sub && <p className={`text-xs font-medium tabular-nums ${TONE_CLASS[subTone]}`}>{sub}</p>}
     </Card>
   );
   return href ? <Link href={href}>{content}</Link> : content;
@@ -242,6 +248,7 @@ export default function FinancialDashboardPage() {
   const xirrQuery = useQuery({ queryKey: ["portfolio-xirr"], queryFn: fetchXirr });
   const transactionsQuery = useQuery({ queryKey: ["transactions"], queryFn: fetchTransactions });
   const portfolioCashFlowsQuery = useQuery({ queryKey: ["portfolio-cash-flows"], queryFn: fetchCashFlows });
+  const baseAssetsQuery = useQuery({ queryKey: ["base-asset-holdings"], queryFn: fetchBaseAssetHoldings });
   const cashflowQuery = useQuery({ queryKey: ["income-expense-cashflow", new Date().getFullYear()], queryFn: () => fetchIncomeExpenseCashflowData() });
   const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
   const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
@@ -294,6 +301,19 @@ export default function FinancialDashboardPage() {
     return openHoldingPnL + closedPositionRealizedPnL;
   }, [cashCostBasis, investmentHoldings, realizedPnLBySymbol]);
   const pnlPct = pctOf(pnl, costTotal);
+  const fmt = (v: number | null | undefined, full = false) =>
+    hideValues ? "****" : full ? formatVNDFull(v) : formatVND(v);
+
+  const totalAssetPnl = useMemo(() => {
+    const currentFixedValue = wealthHoldings.reduce((sum, holding) => {
+      return isFinancialHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
+    }, 0);
+    const baseFixedValue = (baseAssetsQuery.data ?? []).reduce((sum, holding) => {
+      return isFinancialHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
+    }, 0);
+    return currentFixedValue - baseFixedValue + pnl;
+  }, [baseAssetsQuery.data, pnl, wealthHoldings]);
+  const totalAssetPnlText = `${totalAssetPnl >= 0 ? "+" : ""}${fmt(totalAssetPnl, true)} P/L`;
   const xirrAnnual = xirrQuery.data?.xirrAnnual ?? null;
   const forecastDebt = useMemo(() => (
     getForecastDebtForYear(
@@ -328,9 +348,6 @@ export default function FinancialDashboardPage() {
   const goldValue = byType.get("gold") ?? 0;
   const cryptoValue = byType.get("crypto") ?? 0;
   const fundValue = byType.get("fund") ?? byType.get("bond") ?? 0;
-
-  const fmt = (v: number | null | undefined, full = false) =>
-    hideValues ? "****" : full ? formatVNDFull(v) : formatVND(v);
 
   const investLoading = investmentQuery.isLoading;
 
@@ -367,8 +384,9 @@ export default function FinancialDashboardPage() {
               <StatCard
                 label="Tổng tài sản"
                 value={fmt(netWorth, true)}
-                sub="Tất cả danh mục"
-                loading={wealthLoading}
+                sub={totalAssetPnlText}
+                subTone={tone(totalAssetPnl)}
+                loading={wealthLoading || baseAssetsQuery.isLoading || investLoading}
                 href="/wealth-allocation"
               />
               <StatCard
