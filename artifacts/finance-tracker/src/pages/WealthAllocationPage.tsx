@@ -246,7 +246,7 @@ export default function WealthAllocationPage() {
             </div>
 
             {(totalValue > 0 || holdings.length > 0) && (
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 {totalValue > 0 && (
                   <AllocationChart
                     holdings={holdings}
