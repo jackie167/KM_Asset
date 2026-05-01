@@ -54,6 +54,7 @@ export type ForecastTrade = {
   loanAnnualInterestPayment: number;
   loanRepaymentType: "interest_only" | "principal_interest" | "bullet" | "custom";
   settleLoanOnSell: boolean;
+  status: "planned" | "executed";
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -236,13 +237,18 @@ export function computeForecastTotals({
   const fixedBuyByYearKey = new Map<string, number>();
   for (const trade of forecastTrades) {
     if (getTradeInvestmentType(trade)) continue;
+    const countsTowardFreeCash = trade.status !== "executed";
     const k = `${trade.year}::${fixedTradeKey(trade.assetType, trade.symbol)}`;
     if (trade.side === "sell") {
-      tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) + trade.amount);
+      if (countsTowardFreeCash) {
+        tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) + trade.amount);
+      }
       fixedSellByYearKey.set(k, (fixedSellByYearKey.get(k) ?? 0) + trade.amount);
     } else {
       const cashOut = trade.amount * (1 - Math.max(0, Math.min(1, trade.loanRatio ?? 0)));
-      tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) - cashOut);
+      if (countsTowardFreeCash) {
+        tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) - cashOut);
+      }
       fixedBuyByYearKey.set(k, (fixedBuyByYearKey.get(k) ?? 0) + trade.amount);
       if (!fixedValues.some((row) => row.key === fixedTradeKey(trade.assetType, trade.symbol))) {
         fixedValues.push({

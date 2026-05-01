@@ -95,6 +95,7 @@ export async function ensureDatabaseSchema() {
       loan_annual_interest_payment numeric(18, 2) NOT NULL DEFAULT 0,
       loan_repayment_type text NOT NULL DEFAULT 'interest_only',
       settle_loan_on_sell boolean NOT NULL DEFAULT true,
+      status text NOT NULL DEFAULT 'planned',
       note text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
@@ -108,7 +109,8 @@ export async function ensureDatabaseSchema() {
       ADD COLUMN IF NOT EXISTS loan_annual_principal_payment numeric(18, 2) NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS loan_annual_interest_payment numeric(18, 2) NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS loan_repayment_type text NOT NULL DEFAULT 'interest_only',
-      ADD COLUMN IF NOT EXISTS settle_loan_on_sell boolean NOT NULL DEFAULT true
+      ADD COLUMN IF NOT EXISTS settle_loan_on_sell boolean NOT NULL DEFAULT true,
+      ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'planned'
   `);
 
   await pool.query(`

@@ -69,6 +69,10 @@ function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol
   return INVEST_TYPES.find((type) => TYPE_LABELS[type].toLowerCase() === symbol) ?? null;
 }
 
+function isExecutedForecastTrade(trade: Pick<ForecastTrade, "status">) {
+  return trade.status === "executed";
+}
+
 const LS = {
   get: (key: string, fallback: string) => localStorage.getItem(key) ?? fallback,
   set: (key: string, value: string) => localStorage.setItem(key, value),
@@ -458,6 +462,7 @@ export default function AssetForecastPage() {
     const netCashByYear = new Map<number, number>();
     for (const trade of forecastTrades) {
       if (trade.side !== "buy" || getTradeInvestmentType(trade)) continue;
+      if (isExecutedForecastTrade(trade)) continue;
       const loanRatio = Math.max(0, Math.min(1, trade.loanRatio ?? 0));
       const cashOut = trade.amount * (1 - loanRatio);
       netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) - cashOut);
@@ -505,7 +510,9 @@ export default function AssetForecastPage() {
 
       settlementByTradeId.set(trade.id, tradeSettlement);
       settlementByYear.set(trade.year, (settlementByYear.get(trade.year) ?? 0) + tradeSettlement);
-      netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) + remainingCash);
+      if (!isExecutedForecastTrade(trade)) {
+        netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) + remainingCash);
+      }
     }
 
     return {
@@ -1232,6 +1239,7 @@ export default function AssetForecastPage() {
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Year</th>
                       <th className="py-2 px-4 text-left font-medium">Side</th>
+                      <th className="py-2 px-4 text-left font-medium">Status</th>
                       <th className="py-2 px-4 text-left font-medium">Asset</th>
                       <th className="py-2 px-4 text-right font-medium">Amount</th>
                       <th className="py-2 px-4 text-right font-medium">Applied</th>
@@ -1252,6 +1260,9 @@ export default function AssetForecastPage() {
                         <tr key={trade.id}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{trade.year}</td>
                           <td className="py-2 px-4 uppercase text-muted-foreground whitespace-nowrap">{trade.side}</td>
+                          <td className="py-2 px-4 uppercase text-muted-foreground whitespace-nowrap">
+                            {isExecutedForecastTrade(trade) ? "executed" : "planned"}
+                          </td>
                           <td className="py-2 px-4 whitespace-nowrap">{trade.symbol} <span className="text-muted-foreground">({formatTypeLabel(trade.assetType)})</span></td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(trade.amount)}</td>
                           <td className={`py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${appliedAmount < trade.amount ? "text-amber-300" : ""}`}>
@@ -1259,7 +1270,9 @@ export default function AssetForecastPage() {
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums font-medium text-amber-300 whitespace-nowrap">{loanAmount ? formatVNDFull(loanAmount) : "—"}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-medium text-amber-300 whitespace-nowrap">{settlement ? formatVNDFull(settlement) : "—"}</td>
-                          <td className={`py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${netCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(netCash)}</td>
+                          <td className={`py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${netCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
+                            {isExecutedForecastTrade(trade) ? "Investment CASH" : formatVNDFull(netCash)}
+                          </td>
                           <td className="py-2 px-4 text-muted-foreground">{trade.note || "—"}</td>
                           <td className="py-2 pl-4 text-right whitespace-nowrap space-x-1">
                             <Button

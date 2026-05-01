@@ -253,11 +253,21 @@ function transactionCashDelta(transaction: typeof transactionsTable.$inferSelect
   return transaction.side === "buy" ? -amount : amount;
 }
 
+function forecastTradeCashDelta(trade: typeof forecastTradesTable.$inferSelect): number {
+  if (trade.status !== "executed") return 0;
+  if (trade.side !== "sell") return 0;
+  if (trade.year !== new Date().getFullYear()) return 0;
+  if (isFinancialForecastAsset(trade.assetType, trade.symbol)) return 0;
+  const amount = parseFloat(String(trade.amount));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 function calculateForecastCashValue(input: {
   baseValue: number;
   annualRate: number;
   cashFlows: Array<typeof portfolioCashFlowsTable.$inferSelect>;
   transactions: Array<typeof transactionsTable.$inferSelect>;
+  forecastTrades: Array<typeof forecastTradesTable.$inferSelect>;
   now?: Date;
 }): number {
   const now = input.now ?? new Date();
@@ -278,10 +288,29 @@ function calculateForecastCashValue(input: {
       if (transaction.executedAt < periodStart || transaction.executedAt >= periodEnd) return sum;
       return sum + transactionCashDelta(transaction);
     }, 0);
+    const forecastTradeDeltaForMonth = input.forecastTrades.reduce((sum, trade) => {
+      if (trade.createdAt < periodStart || trade.createdAt >= periodEnd) return sum;
+      return sum + forecastTradeCashDelta(trade);
+    }, 0);
 
-    balance = Math.max(0, balance + cashFlowDeltaForMonth + tradeDeltaForMonth);
+    balance = Math.max(0, balance + cashFlowDeltaForMonth + tradeDeltaForMonth + forecastTradeDeltaForMonth);
     balance = Math.max(0, balance * (1 + monthlyRate));
   }
+
+  const currentMonthCashFlowDelta = input.cashFlows.reduce((sum, flow) => {
+    if (flow.occurredAt < cutoff || flow.occurredAt > now) return sum;
+    const amount = parseFloat(String(flow.amount));
+    return Number.isFinite(amount) ? sum + cashFlowDelta(flow.kind, amount) : sum;
+  }, 0);
+  const currentMonthTradeDelta = input.transactions.reduce((sum, transaction) => {
+    if (transaction.executedAt < cutoff || transaction.executedAt > now) return sum;
+    return sum + transactionCashDelta(transaction);
+  }, 0);
+  const currentMonthForecastTradeDelta = input.forecastTrades.reduce((sum, trade) => {
+    if (trade.createdAt < cutoff || trade.createdAt > now) return sum;
+    return sum + forecastTradeCashDelta(trade);
+  }, 0);
+  balance = Math.max(0, balance + currentMonthCashFlowDelta + currentMonthTradeDelta + currentMonthForecastTradeDelta);
 
   return Math.max(0, Math.round(balance));
 }
@@ -363,6 +392,7 @@ async function getPortfolioCurrentValueSnapshot() {
           annualRate: cashAnnualRate,
           cashFlows: portfolioCashFlows,
           transactions: portfolioTransactions,
+          forecastTrades: currentYearForecastTrades,
         })
       : null;
     const fixedAssetCurrentValue = fixedAsset

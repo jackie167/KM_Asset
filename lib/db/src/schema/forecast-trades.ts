@@ -13,6 +13,7 @@ export const forecastTradesTable = pgTable("forecast_trades", {
   loanAnnualInterestPayment: numeric("loan_annual_interest_payment", { precision: 18, scale: 2 }).notNull().default("0"),
   loanRepaymentType: text("loan_repayment_type").notNull().default("interest_only"),
   settleLoanOnSell: boolean("settle_loan_on_sell").notNull().default(true),
+  status: text("status").notNull().default("planned"),
   note: text("note"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

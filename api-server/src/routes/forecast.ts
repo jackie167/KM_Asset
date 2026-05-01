@@ -19,6 +19,7 @@ function serializeForecastTrade(row: typeof forecastTradesTable.$inferSelect) {
     loanAnnualInterestPayment: parseFloat(String(row.loanAnnualInterestPayment ?? 0)),
     loanRepaymentType: row.loanRepaymentType ?? "interest_only",
     settleLoanOnSell: row.settleLoanOnSell ?? true,
+    status: row.status ?? "planned",
     note: row.note,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -150,6 +151,11 @@ function validateFixedAssetTrade(input: z.infer<typeof ForecastTradeBody>) {
     return "Forecast trade chỉ cho phép fixed asset, không dùng financial asset.";
   }
   return null;
+}
+
+function resolveForecastTradeStatus(input: Pick<z.infer<typeof ForecastTradeBody>, "side" | "year">) {
+  const currentYear = new Date().getFullYear();
+  return input.side === "sell" && input.year <= currentYear ? "executed" : "planned";
 }
 
 router.get("/asset-forecast/trades", async (_req, res): Promise<void> => {
@@ -326,6 +332,7 @@ router.post("/asset-forecast/trades", async (req, res): Promise<void> => {
       loanAnnualInterestPayment: String(parsed.data.side === "buy" ? parsed.data.loanAnnualInterestPayment : 0),
       loanRepaymentType: parsed.data.side === "buy" ? parsed.data.loanRepaymentType : "interest_only",
       settleLoanOnSell: parsed.data.side === "buy" ? parsed.data.settleLoanOnSell : true,
+      status: resolveForecastTradeStatus(parsed.data),
       note: parsed.data.note ?? null,
     })
     .returning();
@@ -356,6 +363,7 @@ router.put("/asset-forecast/trades/:id", async (req, res): Promise<void> => {
       loanAnnualInterestPayment: String(parsed.data.side === "buy" ? parsed.data.loanAnnualInterestPayment : 0),
       loanRepaymentType: parsed.data.side === "buy" ? parsed.data.loanRepaymentType : "interest_only",
       settleLoanOnSell: parsed.data.side === "buy" ? parsed.data.settleLoanOnSell : true,
+      status: resolveForecastTradeStatus(parsed.data),
       note: parsed.data.note ?? null,
     })
     .where(eq(forecastTradesTable.id, id))
