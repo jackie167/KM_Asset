@@ -1444,7 +1444,7 @@ export default function AssetForecastPage() {
                   <div key={row} className="h-8 rounded bg-muted animate-pulse" />
                 ))}
               </div>
-            ) : forecastLoans.length === 0 ? (
+            ) : forecastLoansWithTradeBuys.length === 0 ? (
               <p className="text-xs text-muted-foreground">Chưa có khoản vay forecast.</p>
             ) : (
               <>
@@ -1463,71 +1463,95 @@ export default function AssetForecastPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/40">
-                      {forecastLoans.map((loan) => (
-                        <tr key={loan.id}>
-                          <td className="py-2 pr-4 font-medium whitespace-nowrap">{loan.assetSymbol}</td>
-                          <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">{loan.loanName}</td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
-                            <Input
-                              defaultValue={String(loan.principalStart)}
-                              inputMode="decimal"
-                              className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
-                              onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { principalStart: parseAmountInput(event.target.value) } })}
-                            />
-                          </td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
-                              <input
-                                defaultValue={String(loan.interestRate * 100)}
+                      {forecastLoansWithTradeBuys.map((loan) => {
+                        const isTradeLoan = loan.id < 0;
+                        return (
+                          <tr key={loan.id}>
+                            <td className="py-2 pr-4 font-medium whitespace-nowrap">{loan.assetSymbol}</td>
+                            <td className="py-2 px-4 text-muted-foreground whitespace-nowrap">
+                              {loan.loanName}
+                              {isTradeLoan && <span className="ml-2 text-[10px] text-amber-300">Trade</span>}
+                            </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap">
+                              <Input
+                                defaultValue={String(loan.principalStart)}
                                 inputMode="decimal"
-                                className="w-14 bg-transparent text-right text-[11px] tabular-nums outline-none"
-                                onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { interestRate: parsePercentInput(event.target.value) / 100 } })}
+                                disabled={isTradeLoan}
+                                className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
+                                onBlur={(event) => {
+                                  if (!isTradeLoan) updateLoanMutation.mutate({ id: loan.id, input: { principalStart: parseAmountInput(event.target.value) } });
+                                }}
                               />
-                              <span className="text-[10px] text-muted-foreground">%</span>
-                            </div>
-                          </td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
-                            <Input
-                              defaultValue={String(loan.annualPrincipalPayment)}
-                              inputMode="decimal"
-                              className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
-                              onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { annualPrincipalPayment: parseAmountInput(event.target.value) } })}
-                            />
-                          </td>
-                          <td className="py-2 px-4 text-right whitespace-nowrap">
-                            <Input
-                              defaultValue={String(loan.annualInterestPayment)}
-                              inputMode="decimal"
-                              className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
-                              onBlur={(event) => updateLoanMutation.mutate({ id: loan.id, input: { annualInterestPayment: parseAmountInput(event.target.value) } })}
-                            />
-                          </td>
-                          <td className="py-2 px-4 text-center">
-                            <input
-                              type="checkbox"
-                              defaultChecked={loan.settleOnAssetSell}
-                              onChange={(event) => updateLoanMutation.mutate({ id: loan.id, input: { settleOnAssetSell: event.target.checked } })}
-                            />
-                          </td>
-                          <td className="py-2 pl-4 text-muted-foreground min-w-[180px]">{loan.note || "—"}</td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap">
+                              <div className={`inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 ${isTradeLoan ? "opacity-70" : "focus-within:ring-1 focus-within:ring-primary"}`}>
+                                <input
+                                  defaultValue={String(loan.interestRate * 100)}
+                                  inputMode="decimal"
+                                  disabled={isTradeLoan}
+                                  className="w-14 bg-transparent text-right text-[11px] tabular-nums outline-none disabled:cursor-not-allowed"
+                                  onBlur={(event) => {
+                                    if (!isTradeLoan) updateLoanMutation.mutate({ id: loan.id, input: { interestRate: parsePercentInput(event.target.value) / 100 } });
+                                  }}
+                                />
+                                <span className="text-[10px] text-muted-foreground">%</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap">
+                              <Input
+                                defaultValue={String(loan.annualPrincipalPayment)}
+                                inputMode="decimal"
+                                disabled={isTradeLoan}
+                                className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
+                                onBlur={(event) => {
+                                  if (!isTradeLoan) updateLoanMutation.mutate({ id: loan.id, input: { annualPrincipalPayment: parseAmountInput(event.target.value) } });
+                                }}
+                              />
+                            </td>
+                            <td className="py-2 px-4 text-right whitespace-nowrap">
+                              <Input
+                                defaultValue={String(loan.annualInterestPayment)}
+                                inputMode="decimal"
+                                disabled={isTradeLoan}
+                                className="h-8 w-32 ml-auto text-right text-xs tabular-nums"
+                                onBlur={(event) => {
+                                  if (!isTradeLoan) updateLoanMutation.mutate({ id: loan.id, input: { annualInterestPayment: parseAmountInput(event.target.value) } });
+                                }}
+                              />
+                            </td>
+                            <td className="py-2 px-4 text-center">
+                              <input
+                                type="checkbox"
+                                defaultChecked={loan.settleOnAssetSell}
+                                disabled={isTradeLoan}
+                                onChange={(event) => {
+                                  if (!isTradeLoan) updateLoanMutation.mutate({ id: loan.id, input: { settleOnAssetSell: event.target.checked } });
+                                }}
+                              />
+                            </td>
+                            <td className="py-2 pl-4 text-muted-foreground min-w-[180px]">
+                              {isTradeLoan ? "Tự tạo từ Buy trade, sửa trong Trade." : loan.note || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-[1.2fr_0.8fr_1fr_1fr_1.5fr_auto] items-end border-t border-border/40 pt-4">
                   <label className="space-y-1.5 text-xs">
-                    <span className="text-muted-foreground">Khoản vay</span>
-                    <select
-                      value={loanEventLoanId || String(forecastLoans[0]?.id ?? "")}
-                      onChange={(event) => setLoanEventLoanId(event.target.value)}
+                      <span className="text-muted-foreground">Khoản vay</span>
+                      <select
+                        value={loanEventLoanId || String(forecastLoans[0]?.id ?? "")}
+                        onChange={(event) => setLoanEventLoanId(event.target.value)}
                       className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
                     >
                       {forecastLoans.map((loan) => (
                         <option key={loan.id} value={String(loan.id)}>{loan.assetSymbol}</option>
                       ))}
                     </select>
+                    <span className="text-[10px] text-muted-foreground">Event thủ công chỉ áp dụng cho khoản vay DB.</span>
                   </label>
                   <label className="space-y-1.5 text-xs">
                     <span className="text-muted-foreground">Year</span>
