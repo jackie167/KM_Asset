@@ -4,6 +4,7 @@ export const CURRENT_ASSET_SHEET = "Current asset";
 
 const FINANCIAL_TYPES = new Set(["financial"]);
 const REAL_ESTATE_TYPES = new Set(["real_estate", "realestate", "real estate"]);
+const ASSET_RETURN_SETTING_KEY = "asset_forecast_asset_returns";
 
 async function readJsonSafe(res: Response) {
   const contentType = res.headers.get("content-type") || "";
@@ -35,6 +36,51 @@ function parseAmount(value: unknown) {
   const normalized = raw.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parsePercentInput(value: unknown): number {
+  const cleaned = String(value ?? "").trim().replace(/[^\d,.-]/g, "");
+  const normalized = cleaned.includes(",") && !cleaned.includes(".") ? cleaned.replace(",", ".") : cleaned;
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function fixedAssetReturnKey(holding: HoldingItem) {
+  return `${holding.type.trim().toLowerCase()}::${holding.symbol.trim().toUpperCase()}`;
+}
+
+function elapsedMonthsFromBaseYear(baseYear = 2026, now = new Date()) {
+  return Math.max(0, (now.getFullYear() - baseYear) * 12 + now.getMonth());
+}
+
+async function fetchAssetReturnInputs(): Promise<Record<string, string>> {
+  const localValue = localStorage.getItem(ASSET_RETURN_SETTING_KEY);
+  try {
+    const res = await fetch(`/api/settings/${encodeURIComponent(ASSET_RETURN_SETTING_KEY)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof data?.value === "string" && data.value.trim()) return JSON.parse(data.value);
+    }
+  } catch { /* fall back to localStorage */ }
+
+  try {
+    return localValue ? JSON.parse(localValue) : {};
+  } catch {
+    return {};
+  }
+}
+
+function applyMonthlyForecastValue(holding: HoldingItem, returnInputs: Record<string, string>) {
+  const baseValue = holding.currentValue ?? 0;
+  const annualRate = parsePercentInput(returnInputs[fixedAssetReturnKey(holding)] ?? 0) / 100;
+  const months = elapsedMonthsFromBaseYear(2026);
+  const currentValue = baseValue * ((1 + annualRate) ** (months / 12));
+  return {
+    ...holding,
+    currentPrice: currentValue,
+    currentValue,
+    manualPrice: currentValue,
+  };
 }
 
 function findColumn(headers: unknown[], aliases: string[]) {
@@ -170,12 +216,15 @@ export async function fetchFinancialDetailHoldings(): Promise<HoldingItem[]> {
 }
 
 export async function fetchWealthAllocationHoldings() {
-  const [baseHoldings, investmentHoldings] = await Promise.all([
+  const [baseHoldings, investmentHoldings, returnInputs] = await Promise.all([
     fetchBaseAssetHoldings(),
     fetchPortfolioInvestmentHoldings(),
+    fetchAssetReturnInputs(),
   ]);
 
-  const sheetHoldings = baseHoldings.filter((holding) => !FINANCIAL_TYPES.has(holding.type));
+  const sheetHoldings = baseHoldings
+    .filter((holding) => !FINANCIAL_TYPES.has(holding.type))
+    .map((holding) => applyMonthlyForecastValue(holding, returnInputs));
 
   if (investmentHoldings.length === 0) return sheetHoldings;
 
