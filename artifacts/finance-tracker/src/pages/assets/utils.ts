@@ -40,12 +40,12 @@ export function formatVND(value: number | null | undefined): string {
   if (value == null) return "—";
   if (value >= 1_000_000_000) return `${VND_2.format(value / 1_000_000_000)} tỷ`;
   if (value >= 1_000_000) return `${VND_2.format(value / 1_000_000)} tr`;
-  return `${VND_INT.format(value)} ₫`;
+  return VND_INT.format(value);
 }
 
 export function formatVNDFull(value: number | null | undefined): string {
   if (value == null) return "—";
-  return `${VND_INT.format(value)} ₫`;
+  return VND_INT.format(value);
 }
 
 export function formatPercent(value: number | null | undefined): string {

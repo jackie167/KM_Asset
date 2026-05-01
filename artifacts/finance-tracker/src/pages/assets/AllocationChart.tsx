@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { BarChart, Bar, Cell, LabelList, Tooltip, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { Card } from "@/components/ui/card";
 import type { HoldingItem } from "@/pages/assets/types";
-import { formatVND, typeLabel } from "@/pages/assets/utils";
+import { formatVNDFull, typeLabel } from "@/pages/assets/utils";
 
 const PIE_COLORS = [
   "hsl(217, 91%, 60%)",
@@ -99,7 +99,7 @@ export default function AllocationChart({
             <YAxis hide />
             <Tooltip
               formatter={(value: number, _name: string, props: { payload?: { name: string; pct: number } }) => [
-                `${formatVND(value)} (${props.payload?.pct?.toFixed(1) ?? 0}%)`,
+                `${formatVNDFull(value)} (${props.payload?.pct?.toFixed(1) ?? 0}%)`,
                 props.payload?.name ?? "",
               ]}
               contentStyle={{
@@ -165,7 +165,7 @@ export default function AllocationChart({
                   </td>
                 )}
                 <td className="py-2.5 pl-6 text-[11px] font-semibold text-right tabular-nums whitespace-nowrap">
-                  {formatVND(entry.value)}
+                  {formatVNDFull(entry.value)}
                 </td>
               </tr>
             ))}

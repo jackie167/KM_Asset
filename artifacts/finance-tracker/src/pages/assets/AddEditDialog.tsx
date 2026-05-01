@@ -358,10 +358,10 @@ export default function AddEditDialog({
 
             <div>
               <label className="text-sm text-muted-foreground mb-1 block">
-                Total Value (₫)
+                Total Value
                 {watchQty > 0 && totalValueStr && (
                   <span className="ml-1 text-xs text-primary/70">
-                    = {formatVND(parseFloat(totalValueStr.replace(/\./g, "").replace(",", ".")) / watchQty)}/đv
+                    = {formatVND(parseFloat(totalValueStr.replace(/\./g, "").replace(",", ".")) / watchQty)}/unit
                   </span>
                 )}
               </label>

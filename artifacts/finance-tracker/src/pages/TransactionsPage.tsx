@@ -314,7 +314,7 @@ export default function TransactionsPage() {
     },
     onSuccess: (data) => {
       invalidateCashFlow();
-      toast({ title: `Cash synced: ${data.newCashBalance.toLocaleString("vi-VN")} đ` });
+      toast({ title: `Cash synced: ${data.newCashBalance.toLocaleString("vi-VN")}` });
     },
     onError: (err) => toast({ title: "Lỗi", description: err instanceof Error ? err.message : "", variant: "destructive" }),
   });
@@ -438,7 +438,7 @@ export default function TransactionsPage() {
               </Button>
               <div className="text-right">
                 <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Net Flow</div>
-                <div className="text-sm font-semibold tabular-nums">{cashFlowBalance.toLocaleString("vi-VN")} đ</div>
+                <div className="text-sm font-semibold tabular-nums">{cashFlowBalance.toLocaleString("vi-VN")}</div>
               </div>
             </div>
           </div>
@@ -520,7 +520,7 @@ export default function TransactionsPage() {
                         {flow.kind}
                       </td>
                       <td className="py-2 px-3 text-right tabular-nums font-medium">
-                        {flow.amount.toLocaleString("vi-VN")} đ
+                        {flow.amount.toLocaleString("vi-VN")}
                       </td>
                       <td className="py-2 px-3 text-muted-foreground">{flow.account}</td>
                       <td className="py-2 px-3 text-muted-foreground">{flow.origin}</td>
