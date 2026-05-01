@@ -89,10 +89,26 @@ export async function ensureDatabaseSchema() {
       asset_type text NOT NULL,
       symbol text NOT NULL,
       amount numeric(18, 2) NOT NULL,
+      loan_ratio numeric(10, 6) NOT NULL DEFAULT 0,
+      loan_interest_rate numeric(10, 6) NOT NULL DEFAULT 0,
+      loan_annual_principal_payment numeric(18, 2) NOT NULL DEFAULT 0,
+      loan_annual_interest_payment numeric(18, 2) NOT NULL DEFAULT 0,
+      loan_repayment_type text NOT NULL DEFAULT 'interest_only',
+      settle_loan_on_sell boolean NOT NULL DEFAULT true,
       note text,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE forecast_trades
+      ADD COLUMN IF NOT EXISTS loan_ratio numeric(10, 6) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS loan_interest_rate numeric(10, 6) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS loan_annual_principal_payment numeric(18, 2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS loan_annual_interest_payment numeric(18, 2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS loan_repayment_type text NOT NULL DEFAULT 'interest_only',
+      ADD COLUMN IF NOT EXISTS settle_loan_on_sell boolean NOT NULL DEFAULT true
   `);
 
   await pool.query(`

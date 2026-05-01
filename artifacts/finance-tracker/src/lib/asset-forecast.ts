@@ -48,6 +48,12 @@ export type ForecastTrade = {
   assetType: string;
   symbol: string;
   amount: number;
+  loanRatio: number;
+  loanInterestRate: number;
+  loanAnnualPrincipalPayment: number;
+  loanAnnualInterestPayment: number;
+  loanRepaymentType: "interest_only" | "principal_interest" | "bullet" | "custom";
+  settleLoanOnSell: boolean;
   note: string | null;
   createdAt: string;
   updatedAt: string;
@@ -179,11 +185,25 @@ export function computeForecastTotals({
   // --- trade maps ---
   const tradeCashByYear = new Map<number, number>();
   const fixedSellByYearKey = new Map<string, number>();
+  const fixedBuyByYearKey = new Map<string, number>();
   for (const trade of forecastTrades) {
-    if (trade.side !== "sell" || getTradeInvestmentType(trade)) continue;
-    tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) + trade.amount);
+    if (getTradeInvestmentType(trade)) continue;
     const k = `${trade.year}::${fixedTradeKey(trade.assetType, trade.symbol)}`;
-    fixedSellByYearKey.set(k, (fixedSellByYearKey.get(k) ?? 0) + trade.amount);
+    if (trade.side === "sell") {
+      tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) + trade.amount);
+      fixedSellByYearKey.set(k, (fixedSellByYearKey.get(k) ?? 0) + trade.amount);
+    } else {
+      const cashOut = trade.amount * (1 - Math.max(0, Math.min(1, trade.loanRatio ?? 0)));
+      tradeCashByYear.set(trade.year, (tradeCashByYear.get(trade.year) ?? 0) - cashOut);
+      fixedBuyByYearKey.set(k, (fixedBuyByYearKey.get(k) ?? 0) + trade.amount);
+      if (!fixedValues.some((row) => row.key === fixedTradeKey(trade.assetType, trade.symbol))) {
+        fixedValues.push({
+          key: fixedTradeKey(trade.assetType, trade.symbol),
+          startValue: 0,
+          returnRate: assetReturnRates[fixedTradeKey(trade.assetType, trade.symbol)] ?? 0,
+        });
+      }
+    }
   }
 
   // --- allocation rows ---
@@ -213,8 +233,9 @@ export function computeForecastTotals({
     let fixedEnd = 0;
     for (const row of fixedValues) {
       const sellAmount = fixedSellByYearKey.get(`${forecastYear}::${row.key}`) ?? 0;
+      const buyAmount = fixedBuyByYearKey.get(`${forecastYear}::${row.key}`) ?? 0;
       const effectiveSell = Math.min(Math.max(0, row.startValue), sellAmount);
-      const endValue = Math.max(0, row.startValue - effectiveSell) * (1 + row.returnRate);
+      const endValue = Math.max(0, row.startValue + buyAmount - effectiveSell) * (1 + row.returnRate);
       row.startValue = endValue;
       fixedEnd += endValue;
     }

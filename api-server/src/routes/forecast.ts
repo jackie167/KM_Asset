@@ -13,6 +13,12 @@ function serializeForecastTrade(row: typeof forecastTradesTable.$inferSelect) {
     assetType: row.assetType,
     symbol: row.symbol,
     amount: parseFloat(String(row.amount)),
+    loanRatio: parseFloat(String(row.loanRatio ?? 0)),
+    loanInterestRate: parseFloat(String(row.loanInterestRate ?? 0)),
+    loanAnnualPrincipalPayment: parseFloat(String(row.loanAnnualPrincipalPayment ?? 0)),
+    loanAnnualInterestPayment: parseFloat(String(row.loanAnnualInterestPayment ?? 0)),
+    loanRepaymentType: row.loanRepaymentType ?? "interest_only",
+    settleLoanOnSell: row.settleLoanOnSell ?? true,
     note: row.note,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -56,11 +62,17 @@ function serializeForecastLoanEvent(row: typeof forecastLoanEventsTable.$inferSe
 }
 
 const ForecastTradeBody = z.object({
-  side: z.literal("sell"),
+  side: z.enum(["buy", "sell"]),
   year: z.number().int().min(2026).max(2044),
   assetType: z.string().trim().min(1),
   symbol: z.string().trim().min(1),
   amount: z.number().positive(),
+  loanRatio: z.number().min(0).max(1).optional().default(0),
+  loanInterestRate: z.number().min(0).optional().default(0),
+  loanAnnualPrincipalPayment: z.number().nonnegative().optional().default(0),
+  loanAnnualInterestPayment: z.number().nonnegative().optional().default(0),
+  loanRepaymentType: z.enum(["interest_only", "principal_interest", "bullet", "custom"]).optional().default("interest_only"),
+  settleLoanOnSell: z.boolean().optional().default(true),
   note: z.string().trim().max(500).optional().nullable(),
 });
 
@@ -135,7 +147,7 @@ function isFinancialForecastAsset(assetType: string, symbol: string) {
 
 function validateFixedAssetTrade(input: z.infer<typeof ForecastTradeBody>) {
   if (isFinancialForecastAsset(input.assetType, input.symbol)) {
-    return "Forecast trade chỉ cho phép bán fixed asset, không bán financial asset.";
+    return "Forecast trade chỉ cho phép fixed asset, không dùng financial asset.";
   }
   return null;
 }
@@ -308,6 +320,12 @@ router.post("/asset-forecast/trades", async (req, res): Promise<void> => {
       assetType: parsed.data.assetType,
       symbol: parsed.data.symbol,
       amount: String(parsed.data.amount),
+      loanRatio: String(parsed.data.side === "buy" ? parsed.data.loanRatio : 0),
+      loanInterestRate: String(parsed.data.side === "buy" ? parsed.data.loanInterestRate : 0),
+      loanAnnualPrincipalPayment: String(parsed.data.side === "buy" ? parsed.data.loanAnnualPrincipalPayment : 0),
+      loanAnnualInterestPayment: String(parsed.data.side === "buy" ? parsed.data.loanAnnualInterestPayment : 0),
+      loanRepaymentType: parsed.data.side === "buy" ? parsed.data.loanRepaymentType : "interest_only",
+      settleLoanOnSell: parsed.data.side === "buy" ? parsed.data.settleLoanOnSell : true,
       note: parsed.data.note ?? null,
     })
     .returning();
@@ -332,6 +350,12 @@ router.put("/asset-forecast/trades/:id", async (req, res): Promise<void> => {
       assetType: parsed.data.assetType,
       symbol: parsed.data.symbol,
       amount: String(parsed.data.amount),
+      loanRatio: String(parsed.data.side === "buy" ? parsed.data.loanRatio : 0),
+      loanInterestRate: String(parsed.data.side === "buy" ? parsed.data.loanInterestRate : 0),
+      loanAnnualPrincipalPayment: String(parsed.data.side === "buy" ? parsed.data.loanAnnualPrincipalPayment : 0),
+      loanAnnualInterestPayment: String(parsed.data.side === "buy" ? parsed.data.loanAnnualInterestPayment : 0),
+      loanRepaymentType: parsed.data.side === "buy" ? parsed.data.loanRepaymentType : "interest_only",
+      settleLoanOnSell: parsed.data.side === "buy" ? parsed.data.settleLoanOnSell : true,
       note: parsed.data.note ?? null,
     })
     .where(eq(forecastTradesTable.id, id))

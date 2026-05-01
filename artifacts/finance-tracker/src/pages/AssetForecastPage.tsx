@@ -33,12 +33,28 @@ import {
 import type { HoldingItem } from "@/pages/assets/types";
 
 type ForecastTradeInput = {
-  side: "sell";
+  side: "buy" | "sell";
   year: number;
   assetType: string;
   symbol: string;
   amount: number;
+  loanRatio?: number;
+  loanInterestRate?: number;
+  loanAnnualPrincipalPayment?: number;
+  loanAnnualInterestPayment?: number;
+  loanRepaymentType?: ForecastLoan["repaymentType"];
+  settleLoanOnSell?: boolean;
   note?: string | null;
+};
+
+type ForecastFixedAssetRow = {
+  key: string;
+  symbol: string;
+  type: string;
+  startValue: number;
+  returnRate: number;
+  returnInput: string;
+  holding: HoldingItem | null;
 };
 
 function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {
@@ -123,9 +139,18 @@ export default function AssetForecastPage() {
   });
   const [tradeDialogOpen, setTradeDialogOpen] = useState(false);
   const [editingTrade, setEditingTrade] = useState<ForecastTrade | null>(null);
+  const [tradeSide, setTradeSide] = useState<ForecastTrade["side"]>("sell");
   const [tradeYear, setTradeYear] = useState("2026");
   const [tradeAssetKey, setTradeAssetKey] = useState("");
+  const [tradeBuyAssetType, setTradeBuyAssetType] = useState("Real Estate");
+  const [tradeBuySymbol, setTradeBuySymbol] = useState("");
   const [tradeAmount, setTradeAmount] = useState("");
+  const [tradeLoanRatio, setTradeLoanRatio] = useState("0");
+  const [tradeLoanRate, setTradeLoanRate] = useState("0");
+  const [tradeLoanPrincipal, setTradeLoanPrincipal] = useState("0");
+  const [tradeLoanInterest, setTradeLoanInterest] = useState("0");
+  const [tradeLoanRepaymentType, setTradeLoanRepaymentType] = useState<ForecastLoan["repaymentType"]>("interest_only");
+  const [tradeSettleLoanOnSell, setTradeSettleLoanOnSell] = useState(true);
   const [tradeNote, setTradeNote] = useState("");
   const [loanEventLoanId, setLoanEventLoanId] = useState("");
   const [loanEventYear, setLoanEventYear] = useState("2026");
@@ -202,14 +227,15 @@ export default function AssetForecastPage() {
     })).filter((row) => row.startValue !== 0 || allocationRatios[row.type] !== 0);
   }, [allocationRatios, currentAssetRows, investmentReturnInputs]);
 
-  const fixedAssetRows = useMemo(() => {
-    return currentAssetRows.flatMap((holding) => {
+  const fixedAssetRows = useMemo<ForecastFixedAssetRow[]>(() => {
+    const rows: ForecastFixedAssetRow[] = currentAssetRows.flatMap((holding) => {
       if (isUnallocatedFreeCash(holding)) return [];
       if (getInvestmentType(holding)) return [];
       const startValue = holding.currentValue ?? 0;
-      const returnInput = assetReturnInputs[assetReturnKey(holding)] ?? returnRateInput;
+      const key = assetReturnKey(holding);
+      const returnInput = assetReturnInputs[key] ?? returnRateInput;
       return [{
-        key: assetReturnKey(holding),
+        key,
         symbol: holding.symbol,
         type: holding.type,
         startValue,
@@ -218,7 +244,25 @@ export default function AssetForecastPage() {
         holding,
       }];
     });
-  }, [assetReturnInputs, currentAssetRows, returnRateInput]);
+    const existingKeys = new Set(rows.map((row) => row.key));
+    for (const trade of forecastTrades) {
+      if (trade.side !== "buy" || getTradeInvestmentType(trade)) continue;
+      const key = fixedTradeKey(trade.assetType, trade.symbol);
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      const returnInput = assetReturnInputs[key] ?? returnRateInput;
+      rows.push({
+        key,
+        symbol: trade.symbol,
+        type: trade.assetType,
+        startValue: 0,
+        returnRate: parsePercentInput(returnInput) / 100,
+        returnInput,
+        holding: null,
+      });
+    }
+    return rows;
+  }, [assetReturnInputs, currentAssetRows, forecastTrades, returnRateInput]);
 
   const selectedTradeYear = FORECAST_YEARS.includes(Number(tradeYear)) ? Number(tradeYear) : 2026;
 
@@ -234,6 +278,14 @@ export default function AssetForecastPage() {
           result.set(row.key, startValue);
         }
 
+        const buyAmount = tradesForDialog
+          .filter((trade) =>
+            trade.side === "buy" &&
+            trade.year === forecastYear &&
+            !getTradeInvestmentType(trade) &&
+            fixedTradeKey(trade.assetType, trade.symbol) === row.key
+          )
+          .reduce((sum, trade) => sum + trade.amount, 0);
         const sellAmount = tradesForDialog
           .filter((trade) =>
             trade.side === "sell" &&
@@ -242,8 +294,8 @@ export default function AssetForecastPage() {
             fixedTradeKey(trade.assetType, trade.symbol) === row.key
           )
           .reduce((sum, trade) => sum + trade.amount, 0);
-        const effectiveSell = Math.min(Math.max(0, startValue), sellAmount);
-        const valueBeforeReturn = Math.max(0, startValue - effectiveSell);
+        const effectiveSell = Math.min(Math.max(0, startValue + buyAmount), sellAmount);
+        const valueBeforeReturn = Math.max(0, startValue + buyAmount - effectiveSell);
         row.startValue = valueBeforeReturn + (valueBeforeReturn * row.returnRate);
       }
     }
@@ -287,11 +339,53 @@ export default function AssetForecastPage() {
     return result;
   }, [forecastTrades]);
 
+  const fixedBuyByYearAndKey = useMemo(() => {
+    const result = new Map<string, number>();
+    for (const trade of forecastTrades) {
+      if (trade.side !== "buy" || getTradeInvestmentType(trade)) continue;
+      const key = `${trade.year}::${fixedTradeKey(trade.assetType, trade.symbol)}`;
+      result.set(key, (result.get(key) ?? 0) + trade.amount);
+    }
+    return result;
+  }, [forecastTrades]);
+
+  const forecastLoansWithTradeBuys = useMemo(() => {
+    const buyLoans: ForecastLoan[] = forecastTrades.flatMap((trade) => {
+      if (trade.side !== "buy" || getTradeInvestmentType(trade)) return [];
+      const loanRatio = Math.max(0, Math.min(1, trade.loanRatio ?? 0));
+      const principalStart = trade.amount * loanRatio;
+      if (principalStart <= 0) return [];
+      return [{
+        id: -trade.id,
+        assetType: trade.assetType,
+        assetSymbol: trade.symbol,
+        loanName: `${trade.symbol} forecast loan`,
+        principalStart,
+        interestRate: trade.loanInterestRate ?? 0,
+        startYear: trade.year,
+        endYear: null,
+        repaymentType: trade.loanRepaymentType ?? "interest_only",
+        annualPrincipalPayment: trade.loanAnnualPrincipalPayment ?? 0,
+        annualInterestPayment: trade.loanAnnualInterestPayment ?? 0,
+        settleOnAssetSell: trade.settleLoanOnSell ?? true,
+        status: "active",
+        note: `Auto loan from buy trade #${trade.id}`,
+      }];
+    });
+    return [...forecastLoans, ...buyLoans];
+  }, [forecastLoans, forecastTrades]);
+
   const loanEventsWithTradeSettlements = useMemo(() => {
     const derivedEvents: ForecastLoanEvent[] = [];
     const settlementByTradeId = new Map<number, number>();
     const settlementByYear = new Map<number, number>();
     const netCashByYear = new Map<number, number>();
+    for (const trade of forecastTrades) {
+      if (trade.side !== "buy" || getTradeInvestmentType(trade)) continue;
+      const loanRatio = Math.max(0, Math.min(1, trade.loanRatio ?? 0));
+      const cashOut = trade.amount * (1 - loanRatio);
+      netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) - cashOut);
+    }
     const sortedTrades = [...forecastTrades]
       .filter((trade) => trade.side === "sell" && !getTradeInvestmentType(trade))
       .sort((a, b) => a.year - b.year || a.id - b.id);
@@ -300,7 +394,7 @@ export default function AssetForecastPage() {
       let remainingCash = Math.max(0, trade.amount);
       let tradeSettlement = 0;
       const normalizedTradeAsset = normalizeAssetMatcher(trade.symbol);
-      const matchedLoans = forecastLoans.filter((loan) =>
+      const matchedLoans = forecastLoansWithTradeBuys.filter((loan) =>
         loan.status === "active" &&
         loan.settleOnAssetSell &&
         normalizeAssetMatcher(loan.assetSymbol) === normalizedTradeAsset
@@ -309,7 +403,7 @@ export default function AssetForecastPage() {
       for (const loan of matchedLoans) {
         if (remainingCash <= 0) break;
         // Rebuild with prior derived settlements so later trades cannot repay debt that was already cleared.
-        const scheduleWithDerived = buildForecastLoanDetailSchedule(forecastLoans, [
+        const scheduleWithDerived = buildForecastLoanDetailSchedule(forecastLoansWithTradeBuys, [
           ...forecastLoanEvents,
           ...derivedEvents,
         ]);
@@ -343,19 +437,19 @@ export default function AssetForecastPage() {
       settlementByTradeId,
       settlementByYear,
     };
-  }, [forecastLoanEvents, forecastLoans, forecastTrades]);
+  }, [forecastLoanEvents, forecastLoansWithTradeBuys, forecastTrades]);
 
   const tradeCashByYear = loanEventsWithTradeSettlements.netCashByYear;
   const tradeSettlementByYear = loanEventsWithTradeSettlements.settlementByYear;
   const tradeSettlementByTradeId = loanEventsWithTradeSettlements.settlementByTradeId;
 
   const loanScheduleRows = useMemo(() => (
-    buildForecastLoanSchedule(forecastLoans, loanEventsWithTradeSettlements.events)
-  ), [forecastLoans, loanEventsWithTradeSettlements.events]);
+    buildForecastLoanSchedule(forecastLoansWithTradeBuys, loanEventsWithTradeSettlements.events)
+  ), [forecastLoansWithTradeBuys, loanEventsWithTradeSettlements.events]);
 
   const loanDetailScheduleRows = useMemo(() => (
-    buildForecastLoanDetailSchedule(forecastLoans, loanEventsWithTradeSettlements.events)
-  ), [forecastLoans, loanEventsWithTradeSettlements.events]);
+    buildForecastLoanDetailSchedule(forecastLoansWithTradeBuys, loanEventsWithTradeSettlements.events)
+  ), [forecastLoansWithTradeBuys, loanEventsWithTradeSettlements.events]);
 
   const debtPrincipalPaymentByYear = useMemo(() => {
     return new Map(loanScheduleRows.map((row) => [
@@ -429,12 +523,13 @@ export default function AssetForecastPage() {
       const fixedDetails = fixedValues.map((row) => {
         const startValue = row.startValue;
         const sellAmount = fixedSellByYearAndKey.get(`${forecastYear}::${row.key}`) ?? 0;
-        const effectiveSell = Math.min(Math.max(0, startValue), sellAmount);
-        const valueBeforeReturn = Math.max(0, startValue - effectiveSell);
+        const buyAmount = fixedBuyByYearAndKey.get(`${forecastYear}::${row.key}`) ?? 0;
+        const effectiveSell = Math.min(Math.max(0, startValue + buyAmount), sellAmount);
+        const valueBeforeReturn = Math.max(0, startValue + buyAmount - effectiveSell);
         const gain = valueBeforeReturn * row.returnRate;
         const endValue = valueBeforeReturn + gain;
         row.startValue = endValue;
-        return { ...row, startValue, sellAmount: effectiveSell, valueBeforeReturn, gain, endValue };
+        return { ...row, startValue, buyAmount, sellAmount: effectiveSell, valueBeforeReturn, gain, endValue };
       });
 
       const investmentStart = investmentDetails.reduce((sum, row) => sum + row.startValue, 0);
@@ -470,7 +565,7 @@ export default function AssetForecastPage() {
         totalIncrease: totalEnd - totalStart,
       };
     });
-  }, [allocationRows, debtEndByYear, finalFreeCashByYear, fixedAssetRows, fixedSellByYearAndKey, investmentStartRows]);
+  }, [allocationRows, debtEndByYear, finalFreeCashByYear, fixedAssetRows, fixedBuyByYearAndKey, fixedSellByYearAndKey, investmentStartRows]);
 
   const firstForecast = forecastRows[0];
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
@@ -533,7 +628,10 @@ export default function AssetForecastPage() {
   };
 
   const saveAssetReturnInput = (holding: HoldingItem, value: string) => {
-    const key = assetReturnKey(holding);
+    saveFixedAssetReturnInput(assetReturnKey(holding), value);
+  };
+
+  const saveFixedAssetReturnInput = (key: string, value: string) => {
     setAssetReturnInputs((current) => {
       const next = { ...current, [key]: value };
       const json = JSON.stringify(next);
@@ -546,7 +644,16 @@ export default function AssetForecastPage() {
   const closeTradeDialog = () => {
     setTradeDialogOpen(false);
     setEditingTrade(null);
+    setTradeSide("sell");
     setTradeAmount("");
+    setTradeBuyAssetType("Real Estate");
+    setTradeBuySymbol("");
+    setTradeLoanRatio("0");
+    setTradeLoanRate("0");
+    setTradeLoanPrincipal("0");
+    setTradeLoanInterest("0");
+    setTradeLoanRepaymentType("interest_only");
+    setTradeSettleLoanOnSell(true);
     setTradeNote("");
   };
 
@@ -592,43 +699,74 @@ export default function AssetForecastPage() {
 
   const openTradeDialog = () => {
     setEditingTrade(null);
+    setTradeSide("sell");
     setTradeYear("2026");
     setTradeAssetKey((current) => current || tradeAssetOptions[0]?.key || "");
+    setTradeBuyAssetType("Real Estate");
+    setTradeBuySymbol("");
     setTradeAmount("");
+    setTradeLoanRatio("0");
+    setTradeLoanRate("0");
+    setTradeLoanPrincipal("0");
+    setTradeLoanInterest("0");
+    setTradeLoanRepaymentType("interest_only");
+    setTradeSettleLoanOnSell(true);
     setTradeNote("");
     setTradeDialogOpen(true);
   };
 
   const openEditTradeDialog = (trade: ForecastTrade) => {
     setEditingTrade(trade);
+    setTradeSide(trade.side);
     setTradeYear(String(trade.year));
     const assetKey = `fixed::${fixedTradeKey(trade.assetType, trade.symbol)}`;
     setTradeAssetKey(assetKey);
+    setTradeBuyAssetType(trade.assetType);
+    setTradeBuySymbol(trade.symbol);
     setTradeAmount(String(trade.amount));
+    setTradeLoanRatio(String((trade.loanRatio ?? 0) * 100));
+    setTradeLoanRate(String((trade.loanInterestRate ?? 0) * 100));
+    setTradeLoanPrincipal(String(trade.loanAnnualPrincipalPayment ?? 0));
+    setTradeLoanInterest(String(trade.loanAnnualInterestPayment ?? 0));
+    setTradeLoanRepaymentType(trade.loanRepaymentType ?? "interest_only");
+    setTradeSettleLoanOnSell(trade.settleLoanOnSell ?? true);
     setTradeNote(trade.note ?? "");
     setTradeDialogOpen(true);
   };
 
   const selectedTradeOption = tradeAssetOptions.find((item) => item.key === tradeAssetKey) ?? null;
   const tradeAmountNum = parseAmountInput(tradeAmount);
-  const tradeAmountExceedsValue = selectedTradeOption != null && tradeAmountNum > selectedTradeOption.currentValue;
+  const tradeAmountExceedsValue = tradeSide === "sell" && selectedTradeOption != null && tradeAmountNum > selectedTradeOption.currentValue;
+  const tradeLoanRatioNum = Math.max(0, Math.min(100, parsePercentInput(tradeLoanRatio))) / 100;
+  const tradeLoanRateNum = Math.max(0, parsePercentInput(tradeLoanRate)) / 100;
+  const tradeCashPortion = tradeSide === "buy" ? tradeAmountNum * (1 - tradeLoanRatioNum) : 0;
+  const tradeLoanPrincipalAmount = tradeSide === "buy" ? tradeAmountNum * tradeLoanRatioNum : 0;
   const fillFullSellAmount = () => {
     if (!selectedTradeOption) return;
     setTradeAmount(String(Math.round(selectedTradeOption.currentValue)));
   };
 
   const submitSellTrade = () => {
-    const option = selectedTradeOption;
     const amount = tradeAmountNum;
     const year = Number(tradeYear);
-    if (!option || !Number.isInteger(year) || amount <= 0 || amount > option.currentValue) return;
+    if (!Number.isInteger(year) || amount <= 0) return;
+    if (tradeSide === "sell" && (!selectedTradeOption || amount > selectedTradeOption.currentValue)) return;
+    const assetType = tradeSide === "sell" ? selectedTradeOption!.assetType : tradeBuyAssetType.trim();
+    const symbol = tradeSide === "sell" ? selectedTradeOption!.symbol : tradeBuySymbol.trim();
+    if (!assetType || !symbol) return;
 
     const input: ForecastTradeInput = {
-      side: "sell",
+      side: tradeSide,
       year,
-      assetType: option.assetType,
-      symbol: option.symbol,
+      assetType,
+      symbol,
       amount,
+      loanRatio: tradeSide === "buy" ? tradeLoanRatioNum : 0,
+      loanInterestRate: tradeSide === "buy" ? tradeLoanRateNum : 0,
+      loanAnnualPrincipalPayment: tradeSide === "buy" ? parseAmountInput(tradeLoanPrincipal) : 0,
+      loanAnnualInterestPayment: tradeSide === "buy" ? parseAmountInput(tradeLoanInterest) : 0,
+      loanRepaymentType: tradeSide === "buy" ? tradeLoanRepaymentType : "interest_only",
+      settleLoanOnSell: tradeSide === "buy" ? tradeSettleLoanOnSell : true,
       note: tradeNote.trim() || null,
     };
 
@@ -916,7 +1054,7 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Buy/Sell forecast</p>
-            <p className="text-[10px] text-muted-foreground">Sell fixed asset, tất toán vay gắn tài sản trước khi vào free cash</p>
+            <p className="text-[10px] text-muted-foreground">Buy thêm fixed asset, Sell tất toán vay gắn tài sản trước khi vào free cash</p>
           </div>
           <Card className="p-4 md:p-5">
             {forecastTradesQuery.isLoading ? (
@@ -929,13 +1067,14 @@ export default function AssetForecastPage() {
               <p className="text-xs text-muted-foreground">Chưa có giao dịch forecast.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[920px] text-xs">
+                <table className="w-full min-w-[1020px] text-xs">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
                       <th className="py-2 pr-4 text-left font-medium">Year</th>
                       <th className="py-2 px-4 text-left font-medium">Side</th>
                       <th className="py-2 px-4 text-left font-medium">Asset</th>
                       <th className="py-2 px-4 text-right font-medium">Amount</th>
+                      <th className="py-2 px-4 text-right font-medium">Vay</th>
                       <th className="py-2 px-4 text-right font-medium">Tất toán vay</th>
                       <th className="py-2 px-4 text-right font-medium">Net cash</th>
                       <th className="py-2 px-4 text-left font-medium">Note</th>
@@ -945,15 +1084,17 @@ export default function AssetForecastPage() {
                   <tbody className="divide-y divide-border/40">
                     {forecastTrades.map((trade) => {
                       const settlement = tradeSettlementByTradeId.get(trade.id) ?? 0;
-                      const netCash = Math.max(0, trade.amount - settlement);
+                      const loanAmount = trade.side === "buy" ? trade.amount * Math.max(0, Math.min(1, trade.loanRatio ?? 0)) : 0;
+                      const netCash = trade.side === "buy" ? -(trade.amount - loanAmount) : Math.max(0, trade.amount - settlement);
                       return (
                         <tr key={trade.id}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{trade.year}</td>
                           <td className="py-2 px-4 uppercase text-muted-foreground whitespace-nowrap">{trade.side}</td>
                           <td className="py-2 px-4 whitespace-nowrap">{trade.symbol} <span className="text-muted-foreground">({formatTypeLabel(trade.assetType)})</span></td>
                           <td className="py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap">{formatVNDFull(trade.amount)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-medium text-amber-300 whitespace-nowrap">{loanAmount ? formatVNDFull(loanAmount) : "—"}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-medium text-amber-300 whitespace-nowrap">{settlement ? formatVNDFull(settlement) : "—"}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-semibold text-emerald-400 whitespace-nowrap">{formatVNDFull(netCash)}</td>
+                          <td className={`py-2 px-4 text-right tabular-nums font-semibold whitespace-nowrap ${netCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>{formatVNDFull(netCash)}</td>
                           <td className="py-2 px-4 text-muted-foreground">{trade.note || "—"}</td>
                           <td className="py-2 pl-4 text-right whitespace-nowrap space-x-1">
                             <Button
@@ -1036,7 +1177,13 @@ export default function AssetForecastPage() {
                             <div className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 focus-within:ring-1 focus-within:ring-primary">
                               <input
                                 value={row.returnInput}
-                                onChange={(event) => saveAssetReturnInput(row.holding, event.target.value)}
+                                onChange={(event) => {
+                                  if (row.holding) {
+                                    saveAssetReturnInput(row.holding, event.target.value);
+                                  } else {
+                                    saveFixedAssetReturnInput(row.key, event.target.value);
+                                  }
+                                }}
                                 inputMode="decimal"
                                 className="w-10 bg-transparent text-right text-[11px] tabular-nums outline-none"
                               />
@@ -1407,10 +1554,10 @@ export default function AssetForecastPage() {
               <Card className="overflow-hidden">
                 <div className="border-b border-border/40 px-4 py-3 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">
-                    Khoản vay đầu 2026: {formatVNDFull(forecastLoans.reduce((sum, loan) => sum + loan.principalStart, 0))}
+                    Khoản vay đầu 2026: {formatVNDFull(forecastLoansWithTradeBuys.reduce((sum, loan) => sum + (loan.startYear <= 2026 ? loan.principalStart : 0), 0))}
                   </span>
                   <span className="ml-2">
-                    ({forecastLoans.map((loan) => `${loan.assetSymbol}: ${formatVNDFull(loan.principalStart)}`).join(" · ")})
+                    ({forecastLoansWithTradeBuys.map((loan) => `${loan.assetSymbol}${loan.startYear > 2026 ? ` ${loan.startYear}` : ""}: ${formatVNDFull(loan.principalStart)}`).join(" · ")})
                   </span>
                 </div>
                   <div className="overflow-x-auto">
@@ -1478,7 +1625,7 @@ export default function AssetForecastPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/40">
-                          {forecastLoans.flatMap((loan) => {
+                          {forecastLoansWithTradeBuys.flatMap((loan) => {
                             const rowsByYear = new Map(detailRows.filter((row) => row.loanId === loan.id).map((row) => [row.year, row]));
                             return [
                               <tr key={`loan-${loan.id}`} className="bg-muted/20">
@@ -1536,7 +1683,14 @@ export default function AssetForecastPage() {
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1.5 text-xs">
                 <span className="text-muted-foreground">Side</span>
-                <Input value="Sell" disabled className="h-9 text-xs" />
+                <select
+                  value={tradeSide}
+                  onChange={(event) => setTradeSide(event.target.value as ForecastTrade["side"])}
+                  className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="sell">Sell</option>
+                  <option value="buy">Buy</option>
+                </select>
               </label>
               <label className="space-y-1.5 text-xs">
                 <span className="text-muted-foreground">Year</span>
@@ -1552,44 +1706,71 @@ export default function AssetForecastPage() {
               </label>
             </div>
 
-            <label className="space-y-1.5 text-xs block">
-              <span className="text-muted-foreground">Asset</span>
-              <select
-                value={tradeAssetKey}
-                onChange={(event) => setTradeAssetKey(event.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
-              >
-                {tradeAssetOptions.map((option) => (
-                  <option key={option.key} value={option.key}>{option.label}</option>
-                ))}
-              </select>
-            </label>
+            {tradeSide === "sell" ? (
+              <>
+                <label className="space-y-1.5 text-xs block">
+                  <span className="text-muted-foreground">Asset</span>
+                  <select
+                    value={tradeAssetKey}
+                    onChange={(event) => setTradeAssetKey(event.target.value)}
+                    className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {tradeAssetOptions.map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
 
-            {selectedTradeOption && (
-              <div className="rounded-md bg-muted/30 px-3 py-2 text-xs space-y-0.5">
-                <p className="text-muted-foreground">Giá trị đầu năm {selectedTradeYear} theo forecast</p>
-                <p className="font-semibold tabular-nums">{formatVNDFull(selectedTradeOption.forecastStartValue)}</p>
-                {selectedTradeOption.soldByOtherTrades > 0 && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Đã bán trong năm này: {formatVNDFull(selectedTradeOption.soldByOtherTrades)} · Còn có thể bán: {formatVNDFull(selectedTradeOption.currentValue)}
-                  </p>
+                {selectedTradeOption && (
+                  <div className="rounded-md bg-muted/30 px-3 py-2 text-xs space-y-0.5">
+                    <p className="text-muted-foreground">Giá trị đầu năm {selectedTradeYear} theo forecast</p>
+                    <p className="font-semibold tabular-nums">{formatVNDFull(selectedTradeOption.forecastStartValue)}</p>
+                    {selectedTradeOption.soldByOtherTrades > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Đã bán trong năm này: {formatVNDFull(selectedTradeOption.soldByOtherTrades)} · Còn có thể bán: {formatVNDFull(selectedTradeOption.currentValue)}
+                      </p>
+                    )}
+                  </div>
                 )}
+              </>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-1.5 text-xs">
+                  <span className="text-muted-foreground">Asset type</span>
+                  <Input
+                    value={tradeBuyAssetType}
+                    onChange={(event) => setTradeBuyAssetType(event.target.value)}
+                    placeholder="Real Estate"
+                    className="h-9 text-xs"
+                  />
+                </label>
+                <label className="space-y-1.5 text-xs">
+                  <span className="text-muted-foreground">Asset name</span>
+                  <Input
+                    value={tradeBuySymbol}
+                    onChange={(event) => setTradeBuySymbol(event.target.value)}
+                    placeholder="Tên tài sản"
+                    className="h-9 text-xs"
+                  />
+                </label>
               </div>
             )}
 
             <label className="space-y-1.5 text-xs block">
               <span className="flex items-center justify-between gap-3 text-muted-foreground">
-                <span>Giá trị bán</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-[11px]"
-                  disabled={!selectedTradeOption || selectedTradeOption.currentValue <= 0}
-                  onClick={fillFullSellAmount}
-                >
-                  Bán hết
-                </Button>
+                <span>{tradeSide === "buy" ? "Giá trị mua" : "Giá trị bán"}</span>
+                {tradeSide === "sell" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    disabled={!selectedTradeOption || selectedTradeOption.currentValue <= 0}
+                    onClick={fillFullSellAmount}
+                  >
+                    Bán hết
+                  </Button>
+                )}
               </span>
               <Input
                 value={tradeAmount}
@@ -1604,6 +1785,82 @@ export default function AssetForecastPage() {
                 </p>
               )}
             </label>
+
+            {tradeSide === "buy" && (
+              <div className="rounded-md border border-border p-3 text-xs space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-1.5">
+                    <span className="text-muted-foreground">Tỷ lệ vay</span>
+                    <div className="flex h-9 items-center rounded-lg border border-input bg-background/50 px-3 focus-within:ring-2 focus-within:ring-ring">
+                      <input
+                        value={tradeLoanRatio}
+                        onChange={(event) => setTradeLoanRatio(event.target.value)}
+                        inputMode="decimal"
+                        className="w-full bg-transparent text-right text-xs tabular-nums outline-none"
+                      />
+                      <span className="ml-1 text-muted-foreground">%</span>
+                    </div>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-muted-foreground">Lãi suất vay/năm</span>
+                    <div className="flex h-9 items-center rounded-lg border border-input bg-background/50 px-3 focus-within:ring-2 focus-within:ring-ring">
+                      <input
+                        value={tradeLoanRate}
+                        onChange={(event) => setTradeLoanRate(event.target.value)}
+                        inputMode="decimal"
+                        className="w-full bg-transparent text-right text-xs tabular-nums outline-none"
+                      />
+                      <span className="ml-1 text-muted-foreground">%</span>
+                    </div>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-muted-foreground">Trả gốc/năm</span>
+                    <Input
+                      value={tradeLoanPrincipal}
+                      onChange={(event) => setTradeLoanPrincipal(event.target.value)}
+                      inputMode="decimal"
+                      className="h-9 text-xs tabular-nums"
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-muted-foreground">Lãi cố định/năm</span>
+                    <Input
+                      value={tradeLoanInterest}
+                      onChange={(event) => setTradeLoanInterest(event.target.value)}
+                      inputMode="decimal"
+                      className="h-9 text-xs tabular-nums"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-1.5">
+                    <span className="text-muted-foreground">Kiểu trả nợ</span>
+                    <select
+                      value={tradeLoanRepaymentType}
+                      onChange={(event) => setTradeLoanRepaymentType(event.target.value as ForecastLoan["repaymentType"])}
+                      className="h-9 w-full rounded-lg border border-input bg-background/50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="interest_only">Interest only</option>
+                      <option value="principal_interest">Principal + interest</option>
+                      <option value="bullet">Bullet</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  <label className="flex items-end gap-2 pb-2">
+                    <input
+                      type="checkbox"
+                      checked={tradeSettleLoanOnSell}
+                      onChange={(event) => setTradeSettleLoanOnSell(event.target.checked)}
+                    />
+                    <span className="text-muted-foreground">Tất toán vay khi bán</span>
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3 border-t border-border/40 pt-3">
+                  <p className="text-muted-foreground">Cash bỏ ra: <span className="font-semibold text-red-300 tabular-nums">{formatVNDFull(tradeCashPortion)}</span></p>
+                  <p className="text-muted-foreground">Khoản vay tạo mới: <span className="font-semibold text-amber-300 tabular-nums">{formatVNDFull(tradeLoanPrincipalAmount)}</span></p>
+                </div>
+              </div>
+            )}
 
             <label className="space-y-1.5 text-xs block">
               <span className="text-muted-foreground">Note</span>
@@ -1627,9 +1884,15 @@ export default function AssetForecastPage() {
             <Button
               size="sm"
               onClick={submitSellTrade}
-              disabled={createTradeMutation.isPending || updateTradeMutation.isPending || tradeAmountNum <= 0 || tradeAmountExceedsValue}
+              disabled={
+                createTradeMutation.isPending ||
+                updateTradeMutation.isPending ||
+                tradeAmountNum <= 0 ||
+                tradeAmountExceedsValue ||
+                (tradeSide === "buy" && (!tradeBuyAssetType.trim() || !tradeBuySymbol.trim()))
+              }
             >
-              {editingTrade ? "Cập nhật" : "Lưu sell"}
+              {editingTrade ? "Cập nhật" : tradeSide === "buy" ? "Lưu buy" : "Lưu sell"}
             </Button>
           </DialogFooter>
         </DialogContent>
