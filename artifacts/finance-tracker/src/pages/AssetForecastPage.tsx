@@ -220,16 +220,62 @@ export default function AssetForecastPage() {
     });
   }, [assetReturnInputs, currentAssetRows, returnRateInput]);
 
-  // Only fixed (non-investment) assets can be sold via trade dialog
+  const selectedTradeYear = FORECAST_YEARS.includes(Number(tradeYear)) ? Number(tradeYear) : 2026;
+
+  const tradeDialogFixedStartByKey = useMemo(() => {
+    const values = fixedAssetRows.map((row) => ({ ...row }));
+    const result = new Map<string, number>();
+    const tradesForDialog = forecastTrades.filter((trade) => trade.id !== editingTrade?.id);
+
+    for (const forecastYear of FORECAST_YEARS) {
+      for (const row of values) {
+        const startValue = row.startValue;
+        if (forecastYear === selectedTradeYear) {
+          result.set(row.key, startValue);
+        }
+
+        const sellAmount = tradesForDialog
+          .filter((trade) =>
+            trade.side === "sell" &&
+            trade.year === forecastYear &&
+            !getTradeInvestmentType(trade) &&
+            fixedTradeKey(trade.assetType, trade.symbol) === row.key
+          )
+          .reduce((sum, trade) => sum + trade.amount, 0);
+        const effectiveSell = Math.min(Math.max(0, startValue), sellAmount);
+        const valueBeforeReturn = Math.max(0, startValue - effectiveSell);
+        row.startValue = valueBeforeReturn + (valueBeforeReturn * row.returnRate);
+      }
+    }
+
+    return result;
+  }, [editingTrade?.id, fixedAssetRows, forecastTrades, selectedTradeYear]);
+
+  // Only fixed (non-investment) assets can be sold via trade dialog.
   const tradeAssetOptions = useMemo(() =>
-    fixedAssetRows.map((row) => ({
-      key: `fixed::${row.key}`,
-      label: `${row.symbol} (${formatTypeLabel(row.type)})`,
-      assetType: row.type,
-      symbol: row.symbol,
-      currentValue: row.startValue,
-    }))
-  , [fixedAssetRows]);
+    fixedAssetRows.map((row) => {
+      const forecastStartValue = tradeDialogFixedStartByKey.get(row.key) ?? row.startValue;
+      const soldByOtherTrades = forecastTrades
+        .filter((trade) =>
+          trade.id !== editingTrade?.id &&
+          trade.side === "sell" &&
+          trade.year === selectedTradeYear &&
+          !getTradeInvestmentType(trade) &&
+          fixedTradeKey(trade.assetType, trade.symbol) === row.key
+        )
+        .reduce((sum, trade) => sum + trade.amount, 0);
+
+      return {
+        key: `fixed::${row.key}`,
+        label: `${row.symbol} (${formatTypeLabel(row.type)})`,
+        assetType: row.type,
+        symbol: row.symbol,
+        forecastStartValue,
+        soldByOtherTrades,
+        currentValue: Math.max(0, forecastStartValue - soldByOtherTrades),
+      };
+    })
+  , [editingTrade?.id, fixedAssetRows, forecastTrades, selectedTradeYear, tradeDialogFixedStartByKey]);
 
   const fixedSellByYearAndKey = useMemo(() => {
     const result = new Map<string, number>();
@@ -566,6 +612,10 @@ export default function AssetForecastPage() {
   const selectedTradeOption = tradeAssetOptions.find((item) => item.key === tradeAssetKey) ?? null;
   const tradeAmountNum = parseAmountInput(tradeAmount);
   const tradeAmountExceedsValue = selectedTradeOption != null && tradeAmountNum > selectedTradeOption.currentValue;
+  const fillFullSellAmount = () => {
+    if (!selectedTradeOption) return;
+    setTradeAmount(String(Math.round(selectedTradeOption.currentValue)));
+  };
 
   const submitSellTrade = () => {
     const option = selectedTradeOption;
@@ -1517,13 +1567,30 @@ export default function AssetForecastPage() {
 
             {selectedTradeOption && (
               <div className="rounded-md bg-muted/30 px-3 py-2 text-xs space-y-0.5">
-                <p className="text-muted-foreground">Giá trị hiện tại</p>
-                <p className="font-semibold tabular-nums">{formatVNDFull(selectedTradeOption.currentValue)}</p>
+                <p className="text-muted-foreground">Giá trị đầu năm {selectedTradeYear} theo forecast</p>
+                <p className="font-semibold tabular-nums">{formatVNDFull(selectedTradeOption.forecastStartValue)}</p>
+                {selectedTradeOption.soldByOtherTrades > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Đã bán trong năm này: {formatVNDFull(selectedTradeOption.soldByOtherTrades)} · Còn có thể bán: {formatVNDFull(selectedTradeOption.currentValue)}
+                  </p>
+                )}
               </div>
             )}
 
             <label className="space-y-1.5 text-xs block">
-              <span className="text-muted-foreground">Giá trị bán</span>
+              <span className="flex items-center justify-between gap-3 text-muted-foreground">
+                <span>Giá trị bán</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  disabled={!selectedTradeOption || selectedTradeOption.currentValue <= 0}
+                  onClick={fillFullSellAmount}
+                >
+                  Bán hết
+                </Button>
+              </span>
               <Input
                 value={tradeAmount}
                 onChange={(event) => setTradeAmount(event.target.value)}
@@ -1533,7 +1600,7 @@ export default function AssetForecastPage() {
               />
               {tradeAmountExceedsValue && (
                 <p className="text-[10px] text-red-400 mt-1">
-                  Giá bán ({formatVNDFull(tradeAmountNum)}) vượt giá trị hiện tại ({formatVNDFull(selectedTradeOption?.currentValue)})
+                  Giá bán ({formatVNDFull(tradeAmountNum)}) vượt giá trị có thể bán năm {selectedTradeYear} ({formatVNDFull(selectedTradeOption?.currentValue)})
                 </p>
               )}
             </label>
