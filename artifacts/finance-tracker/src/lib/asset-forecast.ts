@@ -108,6 +108,12 @@ export async function fetchForecastTrades(): Promise<ForecastTrade[]> {
 
 export async function fetchFreeCashRows(): Promise<FreeCashRow[]> {
   try {
+    const dbRes = await fetch("/api/income-expense");
+    if (dbRes.ok) {
+      const dbRows = await dbRes.json() as FreeCashRow[];
+      if (dbRows.length > 0) return dbRows;
+    }
+
     const res = await fetch(`/api/excel/sheet?name=${encodeURIComponent(CASHFLOW_SOURCE_SHEET)}`);
     if (!res.ok) return [];
     const data = await res.json();
@@ -121,7 +127,7 @@ export async function fetchFreeCashRows(): Promise<FreeCashRow[]> {
     const otherExpenseCol = findColIdx(headers, ["other expense", "chi phí khác", "chi phi khac"]);
     const interestCol = findColIdx(headers, ["total interest", "interest", "lãi vay", "lai vay"]);
     if (yearCol < 0 || incomeCol < 0) return [];
-    return rows.slice(1).flatMap((row) => {
+    const parsed = rows.slice(1).flatMap((row) => {
       const year = Number(row[yearCol]);
       if (!FORECAST_YEARS.includes(year)) return [];
       const income = parseNum(row[incomeCol]);
@@ -133,7 +139,31 @@ export async function fetchFreeCashRows(): Promise<FreeCashRow[]> {
       const totalExpense = expense + otherExpense + totalInterest;
       return [{ year, income, otherIncome, expense, otherExpense, totalInterest, totalIncome, totalExpense, freeCash: totalIncome - totalExpense }];
     });
+    if (parsed.length > 0) {
+      const imported = await saveIncomeExpenseRows(parsed, "import").catch(() => []);
+      if (imported.length > 0) return imported;
+    }
+    return parsed;
   } catch { return []; }
+}
+
+export async function saveIncomeExpenseRows(rows: FreeCashRow[], mode: "replace" | "import" = "replace"): Promise<FreeCashRow[]> {
+  const res = await fetch(`/api/income-expense${mode === "import" ? "/import" : ""}`, {
+    method: mode === "import" ? "POST" : "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      rows: rows.map((row) => ({
+        year: row.year,
+        income: row.income,
+        otherIncome: row.otherIncome,
+        expense: row.expense,
+        otherExpense: row.otherExpense,
+        totalInterest: row.totalInterest,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error("Không lưu được income/expense.");
+  return res.json();
 }
 
 function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol">): InvestType | null {

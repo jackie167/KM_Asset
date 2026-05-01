@@ -7,7 +7,6 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { CASHFLOW_SOURCE_SHEET } from "@/lib/excel-sheets";
 import {
   FORECAST_YEARS, INITIAL_2026_FREE_CASH, INVEST_TYPES, type InvestType,
   DEFAULT_RATES, TYPE_LABELS, DEFAULT_ALLOCATION_RATIOS,
@@ -16,7 +15,7 @@ import {
   type ForecastTrade,
   DB_KEYS, readJsonRecord, loadDbSetting, saveDbSetting,
   fetchCurrentAssetData, fetchForecastTrades, fetchFreeCashRows,
-  parsePercentInput,
+  parsePercentInput, saveIncomeExpenseRows, type FreeCashRow,
 } from "@/lib/asset-forecast";
 import {
   buildForecastLoanDetailSchedule,
@@ -166,6 +165,8 @@ export default function AssetForecastPage() {
   const [tradeLoanRepaymentType, setTradeLoanRepaymentType] = useState<ForecastLoan["repaymentType"]>("interest_only");
   const [tradeSettleLoanOnSell, setTradeSettleLoanOnSell] = useState(true);
   const [tradeNote, setTradeNote] = useState("");
+  const [incomeExpenseEditing, setIncomeExpenseEditing] = useState(false);
+  const [incomeExpenseDraft, setIncomeExpenseDraft] = useState<Record<number, FreeCashRow>>({});
   const [loanEventLoanId, setLoanEventLoanId] = useState("");
   const [loanEventYear, setLoanEventYear] = useState("2026");
   const [loanEventType, setLoanEventType] = useState<ForecastLoanEvent["eventType"]>("principal_payment");
@@ -755,6 +756,14 @@ export default function AssetForecastPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] }),
   });
 
+  const saveIncomeExpenseMutation = useMutation({
+    mutationFn: (rows: FreeCashRow[]) => saveIncomeExpenseRows(rows),
+    onSuccess: () => {
+      setIncomeExpenseEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["asset-forecast-free-cash-rows"] });
+    },
+  });
+
   const updateLoanMutation = useMutation({
     mutationFn: ({ id, input }: { id: number; input: Partial<ForecastLoan> }) => updateForecastLoan(id, input),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-forecast-loans"] }),
@@ -855,6 +864,50 @@ export default function AssetForecastPage() {
     } else {
       createTradeMutation.mutate(input);
     }
+  };
+
+  const beginIncomeExpenseEdit = () => {
+    const draft = new Map(freeCashRows.map((row) => [row.year, row]));
+    setIncomeExpenseDraft(Object.fromEntries(FORECAST_YEARS.map((year) => {
+      const row = draft.get(year) ?? {
+        year,
+        income: 0,
+        otherIncome: 0,
+        expense: 0,
+        otherExpense: 0,
+        totalInterest: 0,
+        totalIncome: 0,
+        totalExpense: 0,
+        freeCash: 0,
+      };
+      return [year, row];
+    })));
+    setIncomeExpenseEditing(true);
+  };
+
+  const updateIncomeExpenseDraft = (year: number, key: keyof Pick<FreeCashRow, "income" | "otherIncome" | "expense" | "otherExpense" | "totalInterest">, value: string) => {
+    setIncomeExpenseDraft((current) => {
+      const previous = current[year] ?? {
+        year,
+        income: 0,
+        otherIncome: 0,
+        expense: 0,
+        otherExpense: 0,
+        totalInterest: 0,
+        totalIncome: 0,
+        totalExpense: 0,
+        freeCash: 0,
+      };
+      const next = { ...previous, [key]: Math.abs(parseAmountInput(value)) };
+      const totalIncome = next.income + next.otherIncome;
+      const totalExpense = next.expense + next.otherExpense + next.totalInterest;
+      return { ...current, [year]: { ...next, totalIncome, totalExpense, freeCash: totalIncome - totalExpense } };
+    });
+  };
+
+  const saveIncomeExpenseDraft = () => {
+    const rows = FORECAST_YEARS.map((year) => incomeExpenseDraft[year]).filter((row): row is FreeCashRow => Boolean(row));
+    saveIncomeExpenseMutation.mutate(rows);
   };
 
   const submitLoanEvent = () => {
@@ -987,9 +1040,25 @@ export default function AssetForecastPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Free cash từ sheet {CASHFLOW_SOURCE_SHEET}
+              Income / expense từ DB
             </p>
-            <p className="text-[10px] text-muted-foreground">2026-2044</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] text-muted-foreground">2026-2044</p>
+              {incomeExpenseEditing ? (
+                <>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setIncomeExpenseEditing(false)}>
+                    Hủy
+                  </Button>
+                  <Button size="sm" className="h-8 text-xs" disabled={saveIncomeExpenseMutation.isPending} onClick={saveIncomeExpenseDraft}>
+                    Lưu
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={beginIncomeExpenseEdit}>
+                  Edit
+                </Button>
+              )}
+            </div>
           </div>
           <Card className="p-4 md:p-5">
             {freeCashQuery.isLoading ? (
@@ -999,7 +1068,7 @@ export default function AssetForecastPage() {
                 ))}
               </div>
             ) : freeCashRows.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Chưa đọc được dữ liệu free cash từ sheet {CASHFLOW_SOURCE_SHEET}.</p>
+              <p className="text-xs text-muted-foreground">Chưa có dữ liệu income/expense.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1180px] text-xs">
@@ -1032,21 +1101,32 @@ export default function AssetForecastPage() {
                         totalExpense: 0,
                         freeCash: 0,
                       };
+                      const editRow = incomeExpenseEditing ? incomeExpenseDraft[year] ?? row : row;
                       const tradeCash = tradeCashByYear.get(year) ?? 0;
                       const tradeSettlement = tradeSettlementByYear.get(year) ?? 0;
                       const principalPayment = debtPrincipalPaymentByYear.get(year) ?? 0;
                       const loanInterest = debtInterestByYear.get(year) ?? 0;
-                      const totalExpense = row.expense + row.otherExpense + loanInterest;
+                      const totalIncome = editRow.income + editRow.otherIncome;
+                      const totalExpense = editRow.expense + editRow.otherExpense + loanInterest;
                       const freeCash = finalFreeCashByYear.get(year) ?? 0;
+                      const inputClass = "h-8 w-32 ml-auto text-right text-xs tabular-nums";
                       return (
                         <tr key={row.year}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.income)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.otherIncome)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.expense)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(row.otherExpense)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
+                            {incomeExpenseEditing ? <Input defaultValue={String(editRow.income)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "income", event.target.value)} /> : formatVNDFull(row.income)}
+                          </td>
+                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
+                            {incomeExpenseEditing ? <Input defaultValue={String(editRow.otherIncome)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "otherIncome", event.target.value)} /> : formatVNDFull(row.otherIncome)}
+                          </td>
+                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
+                            {incomeExpenseEditing ? <Input defaultValue={String(editRow.expense)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "expense", event.target.value)} /> : formatVNDFull(row.expense)}
+                          </td>
+                          <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
+                            {incomeExpenseEditing ? <Input defaultValue={String(editRow.otherExpense)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "otherExpense", event.target.value)} /> : formatVNDFull(row.otherExpense)}
+                          </td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">{formatVNDFull(loanInterest)}</td>
-                          <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(row.totalIncome)}</td>
+                          <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(totalIncome)}</td>
                           <td className="py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap">{formatVNDFull(totalExpense)}</td>
                           <td className={`py-2 px-4 text-right tabular-nums font-medium whitespace-nowrap ${tradeCash >= 0 ? "text-emerald-400" : "text-red-300"}`}>
                             {tradeCash ? formatVNDFull(tradeCash) : "—"}
