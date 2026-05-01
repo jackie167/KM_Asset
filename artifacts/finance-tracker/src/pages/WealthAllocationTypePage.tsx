@@ -25,6 +25,7 @@ export default function WealthAllocationTypePage() {
   const [showQtyCol, setShowQtyCol] = useState<boolean>(() => localStorage.getItem("wealth_col_qty") === "1");
   const [showPriceCol, setShowPriceCol] = useState<boolean>(() => localStorage.getItem("wealth_col_price") === "1");
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
+  const [currentTotalAsset, setCurrentTotalAsset] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,13 +37,21 @@ export default function WealthAllocationTypePage() {
     setError(null);
     try {
       let filtered;
+      let allHoldings: HoldingItem[] | null = null;
       if (normalizedType === "financial") {
-        filtered = await fetchFinancialDetailHoldings();
+        const [financialHoldings, wealthHoldings] = await Promise.all([
+          fetchFinancialDetailHoldings(),
+          fetchWealthAllocationHoldings(),
+        ]);
+        filtered = financialHoldings;
+        allHoldings = wealthHoldings;
       } else {
         const all = await fetchWealthAllocationHoldings();
         filtered = all.filter((h) => h.type.toLowerCase() === normalizedType);
+        allHoldings = all;
       }
       setHoldings(filtered);
+      setCurrentTotalAsset((allHoldings ?? filtered).reduce((sum, holding) => sum + (holding.currentValue ?? 0), 0));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load data.");
     } finally {
@@ -199,6 +208,8 @@ export default function WealthAllocationTypePage() {
                   <AllocationChart
                     holdings={typeHoldings}
                     totalValue={totalValue}
+                    comparisonTotalValue={normalizedType === "financial" ? currentTotalAsset : undefined}
+                    comparisonShareLabel="Total Asset"
                   />
                 )}
                 <PerformanceChart

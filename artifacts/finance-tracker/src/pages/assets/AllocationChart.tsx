@@ -18,6 +18,8 @@ type AllocationChartProps = {
   onTypeSelect?: (type: string) => void;
   title?: string;
   groupBy?: (holding: HoldingItem) => string;
+  comparisonTotalValue?: number;
+  comparisonShareLabel?: string;
 };
 
 export default function AllocationChart({
@@ -26,6 +28,8 @@ export default function AllocationChart({
   onTypeSelect,
   title = "Asset Allocation",
   groupBy = (holding) => holding.type.toLowerCase(),
+  comparisonTotalValue,
+  comparisonShareLabel = "Total Share",
 }: AllocationChartProps) {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
@@ -43,9 +47,10 @@ export default function AllocationChart({
       name: typeLabel(type),
       value,
       pct: totalValue > 0 ? (value / totalValue) * 100 : 0,
+      comparisonPct: comparisonTotalValue && comparisonTotalValue > 0 ? (value / comparisonTotalValue) * 100 : null,
       color: PIE_COLORS[index % PIE_COLORS.length],
     }));
-  }, [groupBy, holdings, totalValue, sortDir]);
+  }, [comparisonTotalValue, groupBy, holdings, totalValue, sortDir]);
 
   if (data.length === 0) return null;
 
@@ -130,6 +135,9 @@ export default function AllocationChart({
             <tr className="text-[9px] text-muted-foreground uppercase tracking-wider">
               <th className="py-1.5 pr-6 text-left font-normal border-b border-border">Asset Type</th>
               <th className="py-1.5 px-4 text-center font-normal border-b border-border">Share</th>
+              {comparisonTotalValue != null && (
+                <th className="py-1.5 px-4 text-center font-normal border-b border-border">{comparisonShareLabel}</th>
+              )}
               <th className="py-1.5 pl-6 text-right font-normal border-b border-border">Value</th>
             </tr>
           </thead>
@@ -151,6 +159,11 @@ export default function AllocationChart({
                 <td className="py-2.5 px-4 text-[11px] text-center tabular-nums font-medium">
                   {entry.pct.toFixed(1)}%
                 </td>
+                {comparisonTotalValue != null && (
+                  <td className="py-2.5 px-4 text-[11px] text-center tabular-nums text-muted-foreground">
+                    {entry.comparisonPct != null ? `${entry.comparisonPct.toFixed(1)}%` : "—"}
+                  </td>
+                )}
                 <td className="py-2.5 pl-6 text-[11px] font-semibold text-right tabular-nums whitespace-nowrap">
                   {formatVND(entry.value)}
                 </td>
