@@ -21,10 +21,12 @@ import {
 import {
   buildForecastLoanDetailSchedule,
   buildForecastLoanSchedule,
+  buildForecastTradeSettlementSummary,
   createForecastLoanEvent,
   deleteForecastLoanEvent,
   fetchForecastLoanEvents,
   fetchForecastLoans,
+  isExecutedForecastTrade,
   type ForecastLoan,
   type ForecastLoanEvent,
   updateForecastLoan,
@@ -68,10 +70,6 @@ function getTradeInvestmentType(trade: Pick<ForecastTrade, "assetType" | "symbol
   const symbol = trade.symbol.trim().toLowerCase();
   if (isInvestType(symbol)) return symbol;
   return INVEST_TYPES.find((type) => TYPE_LABELS[type].toLowerCase() === symbol) ?? null;
-}
-
-function isExecutedForecastTrade(trade: Pick<ForecastTrade, "status">) {
-  return trade.status === "executed";
 }
 
 const LS = {
@@ -457,71 +455,15 @@ export default function AssetForecastPage() {
   }, [forecastLoans, forecastTrades]);
 
   const loanEventsWithTradeSettlements = useMemo(() => {
-    const derivedEvents: ForecastLoanEvent[] = [];
-    const settlementByTradeId = new Map<number, number>();
-    const settlementByYear = new Map<number, number>();
-    const netCashByYear = new Map<number, number>();
-    for (const trade of forecastTrades) {
-      if (trade.side !== "buy" || getTradeInvestmentType(trade)) continue;
-      if (isExecutedForecastTrade(trade)) continue;
-      const loanRatio = Math.max(0, Math.min(1, trade.loanRatio ?? 0));
-      const cashOut = trade.amount * (1 - loanRatio);
-      netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) - cashOut);
-    }
-    const sortedTrades = [...forecastTrades]
-      .filter((trade) => trade.side === "sell" && !getTradeInvestmentType(trade))
-      .sort((a, b) => a.year - b.year || a.id - b.id);
-
-    for (const trade of sortedTrades) {
-      const effectiveTradeAmount = sellCapacityByTradeId.get(trade.id)?.effectiveSell ?? trade.amount;
-      let remainingCash = Math.max(0, effectiveTradeAmount);
-      let tradeSettlement = 0;
-      const normalizedTradeAsset = normalizeAssetMatcher(trade.symbol);
-      const matchedLoans = forecastLoansWithTradeBuys.filter((loan) =>
-        loan.status === "active" &&
-        loan.settleOnAssetSell &&
-        normalizeAssetMatcher(loan.assetSymbol) === normalizedTradeAsset
-      );
-
-      for (const loan of matchedLoans) {
-        if (remainingCash <= 0) break;
-        // Rebuild with prior derived settlements so later trades cannot repay debt that was already cleared.
-        const scheduleWithDerived = buildForecastLoanDetailSchedule(forecastLoansWithTradeBuys, [
-          ...forecastLoanEvents,
-          ...derivedEvents,
-        ]);
-        const loanRow = scheduleWithDerived.find((row) => row.loanId === loan.id && row.year === trade.year);
-        const outstandingDebt = loanRow?.endingDebt ?? 0;
-        const settlementAmount = Math.min(remainingCash, Math.max(0, outstandingDebt));
-        if (settlementAmount <= 0) continue;
-
-        derivedEvents.push({
-          id: -((trade.id * 1000) + loan.id),
-          loanId: loan.id,
-          year: trade.year,
-          eventType: "settlement",
-          amount: settlementAmount,
-          source: "trade_sell",
-          tradeId: trade.id,
-          note: `Auto settle from sell ${trade.symbol}`,
-        });
-        remainingCash -= settlementAmount;
-        tradeSettlement += settlementAmount;
-      }
-
-      settlementByTradeId.set(trade.id, tradeSettlement);
-      settlementByYear.set(trade.year, (settlementByYear.get(trade.year) ?? 0) + tradeSettlement);
-      if (!isExecutedForecastTrade(trade)) {
-        netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) + remainingCash);
-      }
-    }
-
-    return {
-      events: [...forecastLoanEvents, ...derivedEvents],
-      netCashByYear,
-      settlementByTradeId,
-      settlementByYear,
-    };
+    const effectiveSellByTradeId = new Map(
+      [...sellCapacityByTradeId.entries()].map(([tradeId, row]) => [tradeId, row.effectiveSell])
+    );
+    return buildForecastTradeSettlementSummary(
+      forecastLoansWithTradeBuys,
+      forecastLoanEvents,
+      forecastTrades,
+      effectiveSellByTradeId
+    );
   }, [forecastLoanEvents, forecastLoansWithTradeBuys, forecastTrades, sellCapacityByTradeId]);
 
   const tradeCashByYear = loanEventsWithTradeSettlements.netCashByYear;
@@ -743,17 +685,21 @@ export default function AssetForecastPage() {
     setTradeNote("");
   };
 
+  const invalidateForecastTradeDependents = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
+    queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
+    queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
+    queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
+    queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
+    queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
+  }, [queryClient]);
+
   const createTradeMutation = useMutation({
     mutationFn: createForecastTrade,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
-      queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
-      queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
+      invalidateForecastTradeDependents();
       closeTradeDialog();
     },
   });
@@ -761,14 +707,7 @@ export default function AssetForecastPage() {
   const updateTradeMutation = useMutation({
     mutationFn: ({ id, input }: { id: number; input: ForecastTradeInput }) => updateForecastTrade(id, input),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
-      queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
-      queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
+      invalidateForecastTradeDependents();
       closeTradeDialog();
     },
   });
@@ -776,14 +715,7 @@ export default function AssetForecastPage() {
   const deleteTradeMutation = useMutation({
     mutationFn: deleteForecastTrade,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
-      queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
-      queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
+      invalidateForecastTradeDependents();
     },
   });
 

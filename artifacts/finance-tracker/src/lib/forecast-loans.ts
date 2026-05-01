@@ -60,7 +60,7 @@ function isFinancialTrade(trade: Pick<ForecastTrade, "assetType" | "symbol">) {
     financialTypes.has(trade.symbol.trim().toLowerCase());
 }
 
-function isExecutedForecastTrade(trade: Pick<ForecastTrade, "side" | "year" | "status">) {
+export function isExecutedForecastTrade(trade: Pick<ForecastTrade, "side" | "year" | "status">) {
   return trade.status === "executed" || (trade.side === "sell" && trade.year <= new Date().getFullYear());
 }
 
@@ -121,18 +121,38 @@ export function buildForecastLoanSchedule(
   });
 }
 
-export function buildForecastLoanEventsWithTradeSettlements(
+export type ForecastTradeSettlementSummary = {
+  events: ForecastLoanEvent[];
+  settlementByTradeId: Map<number, number>;
+  settlementByYear: Map<number, number>;
+  netCashByYear: Map<number, number>;
+};
+
+export function buildForecastTradeSettlementSummary(
   loans: ForecastLoan[],
   events: ForecastLoanEvent[],
   trades: ForecastTrade[],
-): ForecastLoanEvent[] {
+  effectiveSellByTradeId = new Map<number, number>(),
+): ForecastTradeSettlementSummary {
   const derivedEvents: ForecastLoanEvent[] = [];
+  const settlementByTradeId = new Map<number, number>();
+  const settlementByYear = new Map<number, number>();
+  const netCashByYear = new Map<number, number>();
+
+  for (const trade of trades) {
+    if (trade.side !== "buy" || isFinancialTrade(trade) || isExecutedForecastTrade(trade)) continue;
+    const loanRatio = Math.max(0, Math.min(1, trade.loanRatio ?? 0));
+    const cashOut = trade.amount * (1 - loanRatio);
+    netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) - cashOut);
+  }
+
   const sortedTrades = [...trades]
     .filter((trade) => trade.side === "sell" && !isFinancialTrade(trade))
     .sort((left, right) => left.year - right.year || left.id - right.id);
 
   for (const trade of sortedTrades) {
-    let remainingCash = Math.max(0, trade.amount);
+    let remainingCash = Math.max(0, effectiveSellByTradeId.get(trade.id) ?? trade.amount);
+    let tradeSettlement = 0;
     const tradeAsset = normalizeAssetMatcher(trade.symbol);
     const matchedLoans = loans.filter((loan) =>
       loan.status === "active" &&
@@ -159,10 +179,30 @@ export function buildForecastLoanEventsWithTradeSettlements(
         note: `Auto settle from sell ${trade.symbol}`,
       });
       remainingCash -= settlementAmount;
+      tradeSettlement += settlementAmount;
+    }
+
+    settlementByTradeId.set(trade.id, tradeSettlement);
+    settlementByYear.set(trade.year, (settlementByYear.get(trade.year) ?? 0) + tradeSettlement);
+    if (!isExecutedForecastTrade(trade)) {
+      netCashByYear.set(trade.year, (netCashByYear.get(trade.year) ?? 0) + remainingCash);
     }
   }
 
-  return [...events, ...derivedEvents];
+  return {
+    events: [...events, ...derivedEvents],
+    settlementByTradeId,
+    settlementByYear,
+    netCashByYear,
+  };
+}
+
+export function buildForecastLoanEventsWithTradeSettlements(
+  loans: ForecastLoan[],
+  events: ForecastLoanEvent[],
+  trades: ForecastTrade[],
+): ForecastLoanEvent[] {
+  return buildForecastTradeSettlementSummary(loans, events, trades).events;
 }
 
 export function buildForecastLoanDetailSchedule(
