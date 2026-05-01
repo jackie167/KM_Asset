@@ -237,26 +237,43 @@ export default function AssetTypePage() {
               onToggleHideValues={toggleHideValues}
             />
 
-            <PerformanceChart
-              title="Performance"
-              seriesLabel=""
-              chartData={supportsHistoricalChart ? chartData : []}
-              hideValues={hideValues}
-              selectedRange={snapshotRange}
-              onRangeChange={setSnapshotRange}
-              emptyMessage={
-                supportsHistoricalChart
-                  ? "No historical data yet."
-                  : "No separate history is available for this asset type yet."
-              }
-            />
-
-            {isInvestmentGroupPage && typeHoldings.length > 0 && (
-              <AllocationChart
-                holdings={typeHoldings}
-                totalValue={totalValue}
-                title="Detail Allocation"
-                onTypeSelect={handleOpenDetailType}
+            {isInvestmentGroupPage ? (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {typeHoldings.length > 0 && (
+                  <AllocationChart
+                    holdings={typeHoldings}
+                    totalValue={totalValue}
+                    title="Detail Allocation"
+                    onTypeSelect={handleOpenDetailType}
+                  />
+                )}
+                <PerformanceChart
+                  title="Performance"
+                  seriesLabel=""
+                  chartData={supportsHistoricalChart ? chartData : []}
+                  hideValues={hideValues}
+                  selectedRange={snapshotRange}
+                  onRangeChange={setSnapshotRange}
+                  emptyMessage={
+                    supportsHistoricalChart
+                      ? "No historical data yet."
+                      : "No separate history is available for this asset type yet."
+                  }
+                />
+              </div>
+            ) : (
+              <PerformanceChart
+                title="Performance"
+                seriesLabel=""
+                chartData={supportsHistoricalChart ? chartData : []}
+                hideValues={hideValues}
+                selectedRange={snapshotRange}
+                onRangeChange={setSnapshotRange}
+                emptyMessage={
+                  supportsHistoricalChart
+                    ? "No historical data yet."
+                    : "No separate history is available for this asset type yet."
+                }
               />
             )}
 
