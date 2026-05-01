@@ -5,6 +5,12 @@ import { db, forecastLoanEventsTable, forecastLoansTable, forecastTradesTable } 
 
 const router: IRouter = Router();
 
+function resolveForecastTradeStatusValue(side: string, year: number, storedStatus?: string | null) {
+  const currentYear = new Date().getFullYear();
+  if (side === "sell" && year <= currentYear) return "executed";
+  return storedStatus === "executed" ? "executed" : "planned";
+}
+
 function serializeForecastTrade(row: typeof forecastTradesTable.$inferSelect) {
   return {
     id: row.id,
@@ -19,7 +25,7 @@ function serializeForecastTrade(row: typeof forecastTradesTable.$inferSelect) {
     loanAnnualInterestPayment: parseFloat(String(row.loanAnnualInterestPayment ?? 0)),
     loanRepaymentType: row.loanRepaymentType ?? "interest_only",
     settleLoanOnSell: row.settleLoanOnSell ?? true,
-    status: row.status ?? "planned",
+    status: resolveForecastTradeStatusValue(row.side, row.year, row.status),
     note: row.note,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -154,8 +160,7 @@ function validateFixedAssetTrade(input: z.infer<typeof ForecastTradeBody>) {
 }
 
 function resolveForecastTradeStatus(input: Pick<z.infer<typeof ForecastTradeBody>, "side" | "year">) {
-  const currentYear = new Date().getFullYear();
-  return input.side === "sell" && input.year <= currentYear ? "executed" : "planned";
+  return resolveForecastTradeStatusValue(input.side, input.year);
 }
 
 router.get("/asset-forecast/trades", async (_req, res): Promise<void> => {

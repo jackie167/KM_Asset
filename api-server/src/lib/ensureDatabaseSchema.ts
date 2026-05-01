@@ -114,6 +114,14 @@ export async function ensureDatabaseSchema() {
   `);
 
   await pool.query(`
+    UPDATE forecast_trades
+    SET status = 'executed', updated_at = now()
+    WHERE side = 'sell'
+      AND year <= EXTRACT(YEAR FROM now())::integer
+      AND status <> 'executed'
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS forecast_trades_year_idx
       ON forecast_trades (year)
   `);

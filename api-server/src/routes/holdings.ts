@@ -253,8 +253,12 @@ function transactionCashDelta(transaction: typeof transactionsTable.$inferSelect
   return transaction.side === "buy" ? -amount : amount;
 }
 
+function isExecutedForecastTrade(trade: typeof forecastTradesTable.$inferSelect): boolean {
+  return trade.status === "executed" || (trade.side === "sell" && trade.year <= new Date().getFullYear());
+}
+
 function forecastTradeCashDelta(trade: typeof forecastTradesTable.$inferSelect): number {
-  if (trade.status !== "executed") return 0;
+  if (!isExecutedForecastTrade(trade)) return 0;
   if (trade.side !== "sell") return 0;
   if (trade.year !== new Date().getFullYear()) return 0;
   if (isFinancialForecastAsset(trade.assetType, trade.symbol)) return 0;
