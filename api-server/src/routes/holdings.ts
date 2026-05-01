@@ -290,6 +290,19 @@ type ForecastLoanRuntime = {
   annualPrincipalPayment: number;
 };
 
+type PortfolioCashFlowLike = {
+  id: number;
+  kind: string;
+  account: string;
+  origin: string;
+  amount: number | string;
+  note: string | null;
+  source: string;
+  occurredAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 function buildExecutedTradeNetCashById(input: {
   loans: ForecastLoanRuntime[];
   events: Array<typeof forecastLoanEventsTable.$inferSelect>;
@@ -367,6 +380,47 @@ function buildExecutedTradeNetCashById(input: {
   }
 
   return result;
+}
+
+async function buildForecastSaleContributionCashFlows(): Promise<PortfolioCashFlowLike[]> {
+  const [forecastLoans, forecastLoanEvents, forecastTrades] = await Promise.all([
+    db.select().from(forecastLoansTable),
+    db.select().from(forecastLoanEventsTable),
+    db.select().from(forecastTradesTable).where(lte(forecastTradesTable.year, new Date().getFullYear())),
+  ]);
+  const executedTradeNetCashById = buildExecutedTradeNetCashById({
+    loans: forecastLoans.map((loan) => ({
+      id: loan.id,
+      assetSymbol: loan.assetSymbol,
+      principalStart: parseFloat(String(loan.principalStart)),
+      startYear: loan.startYear,
+      endYear: loan.endYear,
+      status: loan.status,
+      settleOnAssetSell: loan.settleOnAssetSell,
+      repaymentType: loan.repaymentType,
+      annualPrincipalPayment: parseFloat(String(loan.annualPrincipalPayment)),
+    })),
+    events: forecastLoanEvents,
+    trades: forecastTrades,
+  });
+
+  return forecastTrades.flatMap((trade): PortfolioCashFlowLike[] => {
+    if (!isExecutedForecastTrade(trade) || trade.side !== "sell") return [];
+    const amount = executedTradeNetCashById.get(trade.id) ?? forecastTradeCashDelta(trade);
+    if (!Number.isFinite(amount) || amount <= 0) return [];
+    return [{
+      id: -1_000_000 - trade.id,
+      kind: "deposit",
+      account: "CASH",
+      origin: "forecast_trade",
+      amount,
+      note: `Net cash from selling ${trade.symbol} after debt settlement`,
+      source: `forecast_trade_sell:${trade.id}`,
+      occurredAt: trade.createdAt,
+      createdAt: trade.createdAt,
+      updatedAt: trade.updatedAt,
+    }];
+  });
 }
 
 function calculateForecastCashValue(input: {
@@ -620,8 +674,9 @@ async function buildPortfolioXirrSnapshot() {
     ? "latest_snapshot_before_or_at_start"
     : "reconstructed_from_current_cost_basis_and_internal_trades";
 
-  const externalCashFlows = beginningSnapshot
-    ? await db
+  const [storedExternalCashFlows, syntheticExternalCashFlows] = await Promise.all([
+    beginningSnapshot
+      ? db
       .select()
       .from(portfolioCashFlowsTable)
       .where(
@@ -630,7 +685,7 @@ async function buildPortfolioXirrSnapshot() {
           lte(portfolioCashFlowsTable.occurredAt, asOf),
         )
       )
-    : await db
+      : db
       .select()
       .from(portfolioCashFlowsTable)
       .where(
@@ -638,7 +693,16 @@ async function buildPortfolioXirrSnapshot() {
           gte(portfolioCashFlowsTable.occurredAt, STOCK_RETURN_INITIAL_AT),
           lte(portfolioCashFlowsTable.occurredAt, asOf),
         )
-      );
+      ),
+    buildForecastSaleContributionCashFlows(),
+  ]);
+  const externalCashFlows = [
+    ...storedExternalCashFlows,
+    ...syntheticExternalCashFlows.filter((flow) =>
+      flow.occurredAt > beginningAt &&
+      flow.occurredAt <= asOf
+    ),
+  ];
 
   const externalCashFlowRows = externalCashFlows.flatMap((flow) => {
     const amount = parseFloat(String(flow.amount));
@@ -1002,7 +1066,13 @@ router.get("/portfolio/xirr/export", async (_req, res): Promise<void> => {
 });
 
 router.get("/portfolio/cash-flows", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(portfolioCashFlowsTable).orderBy(portfolioCashFlowsTable.occurredAt);
+  const [storedRows, syntheticRows] = await Promise.all([
+    db.select().from(portfolioCashFlowsTable).orderBy(portfolioCashFlowsTable.occurredAt),
+    buildForecastSaleContributionCashFlows(),
+  ]);
+  const rows: PortfolioCashFlowLike[] = [...storedRows, ...syntheticRows]
+    .sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime());
+
   res.json(rows.map((row) => ({
     id: row.id,
     kind: row.kind,
