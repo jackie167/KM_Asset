@@ -481,6 +481,13 @@ async function savePortfolioSnapshot(
   for (const p of prices) {
     priceMap.set(p.symbol.toUpperCase(), p.price);
   }
+  const latestStoredPrices = await getLatestPrices();
+  for (const p of latestStoredPrices) {
+    const symbol = p.symbol.toUpperCase();
+    if (!priceMap.has(symbol)) {
+      priceMap.set(symbol, parseFloat(String(p.price)));
+    }
+  }
 
   let stockValue = 0;
   let goldValue = 0;

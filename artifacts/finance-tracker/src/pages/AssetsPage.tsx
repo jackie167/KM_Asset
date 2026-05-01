@@ -347,25 +347,45 @@ export default function AssetsPage() {
   const totalValue = summary?.totalValue ?? 0;
   const lastUpdated = summary?.lastUpdated;
 
-  const chartData = [...(snapshots || [])]
-    .sort((a, b) => new Date(a.snapshotAt).getTime() - new Date(b.snapshotAt).getTime())
-    .reduce((acc: ChartPoint[], snapshot) => {
-      const dateKey = format(new Date(snapshot.snapshotAt), "dd/MM");
-      const existing = acc.find((item) => item.date === dateKey);
+  const chartData = useMemo(() => {
+    const points = [...(snapshots || [])]
+      .sort((a, b) => new Date(a.snapshotAt).getTime() - new Date(b.snapshotAt).getTime())
+      .reduce((acc: ChartPoint[], snapshot) => {
+        const dateKey = format(new Date(snapshot.snapshotAt), "dd/MM");
+        const existing = acc.find((item) => item.date === dateKey);
+        if (existing) {
+          existing.totalValue = snapshot.totalValue;
+          existing.stockValue = snapshot.stockValue;
+          existing.goldValue = snapshot.goldValue;
+        } else {
+          acc.push({
+            date: dateKey,
+            totalValue: snapshot.totalValue,
+            stockValue: snapshot.stockValue,
+            goldValue: snapshot.goldValue,
+          });
+        }
+        return acc;
+      }, []);
+
+    if (summary) {
+      const currentDateKey = format(new Date(), "dd/MM");
+      const existing = points.find((item) => item.date === currentDateKey);
+      const currentPoint = {
+        date: currentDateKey,
+        totalValue: summary.totalValue,
+        stockValue: summary.stockValue,
+        goldValue: summary.goldValue,
+      };
       if (existing) {
-        existing.totalValue = snapshot.totalValue;
-        existing.stockValue = snapshot.stockValue;
-        existing.goldValue = snapshot.goldValue;
+        Object.assign(existing, currentPoint);
       } else {
-        acc.push({
-          date: dateKey,
-          totalValue: snapshot.totalValue,
-          stockValue: snapshot.stockValue,
-          goldValue: snapshot.goldValue,
-        });
+        points.push(currentPoint);
       }
-      return acc;
-    }, []);
+    }
+
+    return points;
+  }, [snapshots, summary]);
 
   const sortedHoldings = useMemo(() => {
     if (sortOrder === "none") return holdings;
