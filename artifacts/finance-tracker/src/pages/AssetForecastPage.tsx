@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getGetPortfolioSummaryQueryKey, getListHoldingsQueryKey, getListSnapshotsQueryKey } from "@workspace/api-client-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import PageHeader from "@/pages/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -746,6 +747,13 @@ export default function AssetForecastPage() {
     mutationFn: createForecastTrade,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
+      queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
+      queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
       closeTradeDialog();
     },
   });
@@ -754,13 +762,29 @@ export default function AssetForecastPage() {
     mutationFn: ({ id, input }: { id: number; input: ForecastTradeInput }) => updateForecastTrade(id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
+      queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
+      queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
       closeTradeDialog();
     },
   });
 
   const deleteTradeMutation = useMutation({
     mutationFn: deleteForecastTrade,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["asset-forecast-trades"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio-cash-flows"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio-xirr"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-investment"] });
+      queryClient.invalidateQueries({ queryKey: ["wealth-allocation-holdings"] });
+      queryClient.invalidateQueries({ queryKey: getListHoldingsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetPortfolioSummaryQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListSnapshotsQueryKey() });
+    },
   });
 
   const saveIncomeExpenseMutation = useMutation({
