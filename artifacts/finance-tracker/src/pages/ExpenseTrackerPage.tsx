@@ -432,14 +432,6 @@ export default function ExpenseTrackerPage() {
                 <col className="w-1/5" />
               </colgroup>
               <tbody className="divide-y divide-border/40">
-                {/* Investment */}
-                <tr className="hover:bg-muted/20">
-                  <td className="px-4 py-2.5 font-semibold">Investment</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{fmt(alloc.invest, hide)}</td>
-                  <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">
-                    {totalIncome > 0 ? fmtPct(alloc.invest / totalIncome) : "—"}
-                  </td>
-                </tr>
                 {/* Need */}
                 <tr className="hover:bg-muted/20">
                   <td className="px-4 py-2.5 font-semibold">Need</td>
@@ -497,12 +489,6 @@ export default function ExpenseTrackerPage() {
                   <td className="px-3 py-2 text-right text-xs text-muted-foreground">
                     {alloc.want > 0 && remaining != null ? fmtPct(remaining / alloc.want) : "—"}
                   </td>
-                </tr>
-                {/* Total */}
-                <tr className="border-t-2 border-border">
-                  <td className="px-4 py-2.5 font-bold">Total</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-bold">{fmt(totalIncome, hide)}</td>
-                  <td />
                 </tr>
               </tbody>
             </table>
