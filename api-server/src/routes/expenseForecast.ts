@@ -122,10 +122,28 @@ router.put("/expense-forecast", async (req, res): Promise<void> => {
     return;
   }
 
+  // Propagate want categories: if a year has all-zero cats, fill from previous year * 1.04
+  const sorted = [...parsed.data.rows].sort((a, b) => a.year - b.year);
+  for (let i = 1; i < sorted.length; i++) {
+    const cur = sorted[i]!;
+    const prev = sorted[i - 1]!;
+    const curHasCats = cur.wantShopping + cur.wantTravel + cur.wantSupport + cur.wantPersonal + cur.wantOther > 0;
+    const prevHasCats = prev.wantShopping + prev.wantTravel + prev.wantSupport + prev.wantPersonal + prev.wantOther > 0;
+    if (!curHasCats && prevHasCats) {
+      const f = Math.pow(1.04, cur.year - prev.year);
+      cur.wantShopping = prev.wantShopping * f;
+      cur.wantTravel   = prev.wantTravel   * f;
+      cur.wantSupport  = prev.wantSupport  * f;
+      cur.wantPersonal = prev.wantPersonal * f;
+      cur.wantOther    = prev.wantOther    * f;
+      cur.wantBudget   = cur.wantShopping + cur.wantTravel + cur.wantSupport + cur.wantPersonal + cur.wantOther;
+    }
+  }
+
   await db.delete(expenseForecastTable);
   const rows = await db
     .insert(expenseForecastTable)
-    .values(parsed.data.rows.map((row) => ({
+    .values(sorted.map((row) => ({
       year: row.year,
       income: String(row.income),
       otherIncome: String(row.otherIncome),

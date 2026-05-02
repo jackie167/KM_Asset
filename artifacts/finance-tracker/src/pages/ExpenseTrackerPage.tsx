@@ -236,14 +236,31 @@ export default function ExpenseTrackerPage() {
   };
 
   const beginForecastEdit = () => {
-    setForecastDraft(Object.fromEntries(forecastRows.map((row) => [row.year, {
-      ...row,
-      wantShopping: row.wantShopping ?? 0,
-      wantTravel:   row.wantTravel   ?? 0,
-      wantSupport:  row.wantSupport  ?? 0,
-      wantPersonal: row.wantPersonal ?? 0,
-      wantOther:    row.wantOther    ?? 0,
-    }])));
+    const sorted = [...forecastRows].sort((a, b) => a.year - b.year);
+    const draft: typeof forecastDraft = {};
+    for (let i = 0; i < sorted.length; i++) {
+      const row = sorted[i]!;
+      const prev = i > 0 ? draft[sorted[i - 1]!.year] : undefined;
+      const shopping  = row.wantShopping ?? 0;
+      const travel    = row.wantTravel   ?? 0;
+      const support   = row.wantSupport  ?? 0;
+      const personal  = row.wantPersonal ?? 0;
+      const other     = row.wantOther    ?? 0;
+      const hasCats   = shopping + travel + support + personal + other > 0;
+      const prevHas   = prev && (prev.wantShopping + prev.wantTravel + prev.wantSupport + prev.wantPersonal + prev.wantOther) > 0;
+      if (!hasCats && prevHas && prev) {
+        const f = Math.pow(1.04, row.year - sorted[i - 1]!.year);
+        const s = prev.wantShopping * f;
+        const t = prev.wantTravel   * f;
+        const su = prev.wantSupport  * f;
+        const p = prev.wantPersonal * f;
+        const o = prev.wantOther    * f;
+        draft[row.year] = { ...row, wantShopping: s, wantTravel: t, wantSupport: su, wantPersonal: p, wantOther: o, wantBudget: s + t + su + p + o };
+      } else {
+        draft[row.year] = { ...row, wantShopping: shopping, wantTravel: travel, wantSupport: support, wantPersonal: personal, wantOther: other };
+      }
+    }
+    setForecastDraft(draft);
     setForecastEditing(true);
   };
 
