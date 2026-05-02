@@ -7,6 +7,13 @@ const REAL_ESTATE_TYPES = new Set(["real_estate", "realestate", "real estate"]);
 const ASSET_RETURN_SETTING_KEY = "asset_forecast_asset_returns";
 const FINANCIAL_TRADE_TYPES = new Set(["cash", "stock", "gold", "fund", "crypto"]);
 const FINANCIAL_DETAIL_ORDER = ["cash", "stock", "gold", "fund", "crypto"];
+const FINANCIAL_DETAIL_LABELS: Record<string, string> = {
+  cash: "Cash",
+  stock: "Stock",
+  gold: "Gold",
+  fund: "Fund",
+  crypto: "Crypto",
+};
 
 type ForecastTrade = {
   id: number;
@@ -288,7 +295,7 @@ function groupFinancialHoldingsByType(holdings: HoldingItem[]): HoldingItem[] {
 
     byType.set(type, {
       id: -10_000 - byType.size,
-      symbol: type,
+      symbol: FINANCIAL_DETAIL_LABELS[type] ?? type,
       type,
       quantity: 1,
       currentPrice: currentValue,
@@ -310,7 +317,7 @@ function groupFinancialHoldingsByType(holdings: HoldingItem[]): HoldingItem[] {
   });
 }
 
-export async function fetchWealthAllocationHoldings() {
+async function fetchWealthAllocationParts() {
   const [baseHoldings, investmentHoldings, returnInputs, forecastTrades] = await Promise.all([
     fetchBaseAssetHoldings(),
     fetchPortfolioInvestmentHoldings(),
@@ -323,5 +330,31 @@ export async function fetchWealthAllocationHoldings() {
     .map((holding) => applyMonthlyForecastValue(holding, returnInputs));
   const currentFixedHoldings = applyCurrentYearTrades(sheetHoldings, forecastTrades);
 
+  return { currentFixedHoldings, investmentHoldings };
+}
+
+export async function fetchWealthAllocationSummaryHoldings() {
+  const { currentFixedHoldings, investmentHoldings } = await fetchWealthAllocationParts();
+  const investmentValue = investmentHoldings.reduce((sum, holding) => sum + (holding.currentValue ?? 0), 0);
+  if (investmentValue <= 0) return currentFixedHoldings;
+
+  return [
+    ...currentFixedHoldings,
+    {
+      id: -9_999,
+      symbol: "Financial",
+      type: "financial",
+      quantity: 1,
+      currentPrice: investmentValue,
+      currentValue: investmentValue,
+      change: null,
+      changePercent: null,
+      manualPrice: investmentValue,
+    } satisfies HoldingItem,
+  ];
+}
+
+export async function fetchWealthAllocationHoldings() {
+  const { currentFixedHoldings, investmentHoldings } = await fetchWealthAllocationParts();
   return [...currentFixedHoldings, ...groupFinancialHoldingsByType(investmentHoldings)];
 }

@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
-import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
+import { fetchWealthAllocationHoldings, fetchWealthAllocationSummaryHoldings } from "@/pages/wealthAllocationData";
 import { fetchForecastTrades } from "@/lib/asset-forecast";
 import { buildForecastLoanEventsWithTradeSettlements, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +28,7 @@ export default function WealthAllocationPage() {
   const [showQtyCol, setShowQtyCol] = useState<boolean>(() => localStorage.getItem("wealth_col_qty") === "1");
   const [showPriceCol, setShowPriceCol] = useState<boolean>(() => localStorage.getItem("wealth_col_price") === "1");
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
+  const [allocationHoldings, setAllocationHoldings] = useState<HoldingItem[]>([]);
   const [debt, setDebt] = useState<number>(0);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,13 +38,15 @@ export default function WealthAllocationPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [wealthHoldings, totalAssetData, forecastTrades, latestSnapshot] = await Promise.all([
+      const [wealthHoldings, summaryHoldings, totalAssetData, forecastTrades, latestSnapshot] = await Promise.all([
         fetchWealthAllocationHoldings(),
+        fetchWealthAllocationSummaryHoldings(),
         Promise.all([fetchForecastLoans(), fetchForecastLoanEvents()]),
         fetchForecastTrades(),
         fetch("/api/wealth/snapshots/latest").then((r) => r.ok ? r.json() : null).catch(() => null),
       ]);
       setHoldings(wealthHoldings);
+      setAllocationHoldings(summaryHoldings);
       setDebt(getForecastDebtForYear(
         totalAssetData[0],
         buildForecastLoanEventsWithTradeSettlements(totalAssetData[0], totalAssetData[1], forecastTrades)
@@ -62,8 +65,8 @@ export default function WealthAllocationPage() {
   }, [loadWealthAllocation]);
 
   const totalValue = useMemo(
-    () => holdings.reduce((sum, holding) => sum + (holding.currentValue ?? 0), 0),
-    [holdings]
+    () => allocationHoldings.reduce((sum, holding) => sum + (holding.currentValue ?? 0), 0),
+    [allocationHoldings]
   );
 
   const sortedHoldings = useMemo(() => {
@@ -159,7 +162,7 @@ export default function WealthAllocationPage() {
         totalAsset: totalValue,
         debt,
         netAsset,
-        items: holdings.map((h) => ({
+        items: allocationHoldings.map((h) => ({
           type: h.type,
           label: h.symbol,
           value: h.currentValue ?? 0,
@@ -253,7 +256,7 @@ export default function WealthAllocationPage() {
               <div className="grid lg:grid-cols-2 gap-4">
                 {totalValue > 0 && (
                   <AllocationChart
-                    holdings={holdings}
+                    holdings={allocationHoldings}
                     totalValue={totalValue}
                     onTypeSelect={handleOpenAssetType}
                   />
