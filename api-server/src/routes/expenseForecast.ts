@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, expenseForecastTable, incomeExpenseTable } from "../../../lib/db/src/index.ts";
 
 const router: IRouter = Router();
@@ -185,7 +185,6 @@ router.patch("/expense-forecast/:year/actual", async (req, res): Promise<void> =
   }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  const { eq } = await import("drizzle-orm");
   const [row] = await db
     .update(expenseForecastTable)
     .set({

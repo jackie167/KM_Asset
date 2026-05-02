@@ -209,11 +209,12 @@ export default function ExpenseTrackerPage() {
 
   const saveActualMut = useMutation({
     mutationFn: async ({ yr, needTotal, wantTotal }: { yr: number; needTotal: number; wantTotal: number }) => {
-      await fetch(`/api/expense-forecast/${yr}/actual`, {
+      const res = await fetch(`/api/expense-forecast/${yr}/actual`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ actualNeed: needTotal, actualWant: wantTotal }),
       });
+      if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["expense-forecast"] }),
   });
@@ -251,8 +252,8 @@ export default function ExpenseTrackerPage() {
     if (!selectedForecast || summaryQuery.isLoading || forecastQuery.isLoading) return;
     if (alloc.needTotal <= 0 && totalSpent <= 0) return;
     const alreadySaved =
-      selectedForecast.actualNeed === alloc.needTotal &&
-      selectedForecast.actualWant === totalSpent;
+      Math.round(selectedForecast.actualNeed ?? -1) === Math.round(alloc.needTotal) &&
+      Math.round(selectedForecast.actualWant ?? -1) === Math.round(totalSpent);
     if (alreadySaved) return;
     saveActualMut.mutate({ yr: selectedYear, needTotal: alloc.needTotal, wantTotal: totalSpent });
   // eslint-disable-next-line react-hooks/exhaustive-deps
