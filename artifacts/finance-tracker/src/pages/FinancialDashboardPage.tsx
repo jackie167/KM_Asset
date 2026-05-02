@@ -175,14 +175,16 @@ function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{row.label}</p>
-                  {row.sub && <p className={`mt-1 text-xs font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
                 </div>
                 {row.loading ? (
                   <div className="h-6 w-28 rounded bg-muted animate-pulse" />
                 ) : (
-                  <p className={`text-sm md:text-base font-bold tabular-nums text-right break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
-                    {row.value}
-                  </p>
+                  <div className="min-w-0 text-right">
+                    <p className={`text-sm md:text-base font-bold tabular-nums break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
+                      {row.value}
+                    </p>
+                    {row.sub && <p className={`mt-1 text-xs font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
+                  </div>
                 )}
               </div>
             </div>
