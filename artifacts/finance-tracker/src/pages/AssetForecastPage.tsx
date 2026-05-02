@@ -210,6 +210,14 @@ export default function AssetForecastPage() {
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const freeCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
   const forecastTradesQuery = useQuery({ queryKey: ["asset-forecast-trades"], queryFn: fetchForecastTrades });
+  const expenseForecastQuery = useQuery({
+    queryKey: ["expense-forecast"],
+    queryFn: async () => {
+      const res = await fetch("/api/expense-forecast");
+      if (!res.ok) return [];
+      return res.json() as Promise<{ year: number; actualBalance: number | null }[]>;
+    },
+  });
   const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
   const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
 
@@ -497,6 +505,18 @@ export default function AssetForecastPage() {
     return new Map(freeCashRows.map((row) => [row.year, row.freeCash + row.totalInterest]));
   }, [freeCashRows]);
 
+  // actualBalance(year N) → added to Spending Fund start of year N+1
+  const spendingFundExtraByYear = useMemo(() => {
+    const rows = expenseForecastQuery.data ?? [];
+    const result = new Map<number, number>();
+    for (const row of rows) {
+      if (row.actualBalance != null && row.actualBalance !== 0) {
+        result.set(row.year + 1, (result.get(row.year + 1) ?? 0) + row.actualBalance);
+      }
+    }
+    return result;
+  }, [expenseForecastQuery.data]);
+
   const finalFreeCashByYear = useMemo(() => {
     return new Map(FORECAST_YEARS.map((year) => [
       year,
@@ -548,7 +568,9 @@ export default function AssetForecastPage() {
       });
 
       const fixedDetails = fixedValues.map((row) => {
-        const startValue = row.startValue;
+        const isSpendingFund = row.type.trim().toLowerCase().replace(/[\s_-]+/g, "_").includes("spending");
+        const spendingExtra = isSpendingFund ? (spendingFundExtraByYear.get(forecastYear) ?? 0) : 0;
+        const startValue = row.startValue + spendingExtra;
         const sellAmount = fixedSellByYearAndKey.get(`${forecastYear}::${row.key}`) ?? 0;
         const buyAmount = fixedBuyByYearAndKey.get(`${forecastYear}::${row.key}`) ?? 0;
         const effectiveSell = Math.min(Math.max(0, startValue + buyAmount), sellAmount);
@@ -592,7 +614,7 @@ export default function AssetForecastPage() {
         totalIncrease: totalEnd - totalStart,
       };
     });
-  }, [allocationRows, debtEndByYear, finalFreeCashByYear, fixedAssetRows, fixedBuyByYearAndKey, fixedSellByYearAndKey, investmentStartRows]);
+  }, [allocationRows, debtEndByYear, finalFreeCashByYear, fixedAssetRows, fixedBuyByYearAndKey, fixedSellByYearAndKey, investmentStartRows, spendingFundExtraByYear]);
 
   const firstForecast = forecastRows[0];
   const initialFixedTotal = fixedAssetRows.reduce((sum, row) => sum + row.startValue, 0);
