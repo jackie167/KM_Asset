@@ -100,11 +100,11 @@ async function saveExpenseForecast(rows: ExpenseForecastRow[]): Promise<ExpenseF
         needAllowance: row.needAllowance,
         needMaintenance: row.needMaintenance,
         wantBudget: row.wantBudget,
-        wantShopping: row.wantShopping,
-        wantTravel: row.wantTravel,
-        wantSupport: row.wantSupport,
-        wantPersonal: row.wantPersonal,
-        wantOther: row.wantOther,
+        wantShopping: row.wantShopping ?? 0,
+        wantTravel:   row.wantTravel   ?? 0,
+        wantSupport:  row.wantSupport  ?? 0,
+        wantPersonal: row.wantPersonal ?? 0,
+        wantOther:    row.wantOther    ?? 0,
         note: row.note,
       })),
     }),
@@ -236,7 +236,14 @@ export default function ExpenseTrackerPage() {
   };
 
   const beginForecastEdit = () => {
-    setForecastDraft(Object.fromEntries(forecastRows.map((row) => [row.year, { ...row }])));
+    setForecastDraft(Object.fromEntries(forecastRows.map((row) => [row.year, {
+      ...row,
+      wantShopping: row.wantShopping ?? 0,
+      wantTravel:   row.wantTravel   ?? 0,
+      wantSupport:  row.wantSupport  ?? 0,
+      wantPersonal: row.wantPersonal ?? 0,
+      wantOther:    row.wantOther    ?? 0,
+    }])));
     setForecastEditing(true);
   };
 
@@ -253,7 +260,7 @@ export default function ExpenseTrackerPage() {
       const investmentAmount = totalIncome * (next.investmentRatio / 100);
       const availableAfterInvestment = totalIncome - investmentAmount;
       const needTotal = next.needLiving + next.needTuition + next.needAllowance + next.needMaintenance;
-      const wantCatTotal = next.wantShopping + next.wantTravel + next.wantSupport + next.wantPersonal + next.wantOther;
+      const wantCatTotal = (next.wantShopping ?? 0) + (next.wantTravel ?? 0) + (next.wantSupport ?? 0) + (next.wantPersonal ?? 0) + (next.wantOther ?? 0);
       const wantBudget = wantCatTotal > 0 ? wantCatTotal : next.wantBudget;
       const spendingFundChange = availableAfterInvestment - needTotal - wantBudget;
       return {
