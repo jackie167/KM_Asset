@@ -244,7 +244,8 @@ export default function AssetTypePage() {
                     holdings={typeHoldings}
                     totalValue={totalValue}
                     title="Detail Allocation"
-                    onTypeSelect={handleOpenDetailType}
+                    groupBy={normalizedType === "real_estate" ? (holding) => holding.symbol : undefined}
+                    onTypeSelect={normalizedType === "real_estate" ? undefined : handleOpenDetailType}
                   />
                 )}
                 <PerformanceChart

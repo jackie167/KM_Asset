@@ -208,6 +208,7 @@ export default function WealthAllocationTypePage() {
                   <AllocationChart
                     holdings={typeHoldings}
                     totalValue={totalValue}
+                    groupBy={normalizedType === "real_estate" ? (holding) => holding.symbol : undefined}
                     comparisonTotalValue={normalizedType === "financial" ? currentTotalAsset : undefined}
                     comparisonShareLabel="Total Asset"
                   />
