@@ -19,6 +19,7 @@ const NAV_LINKS = [
   { href: "/fire",              label: "FIRE Planning" },
   { href: "/asset-forecast",    label: "Dự báo tài sản" },
   { href: "/expenses",          label: "Chi tiêu" },
+  { href: "/income-forecast",   label: "Kế hoạch thu nhập" },
 ];
 
 export type MenuAction =

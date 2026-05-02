@@ -1,0 +1,120 @@
+import { Router, type IRouter } from "express";
+import { z } from "zod/v4";
+import { asc, eq, inArray } from "drizzle-orm";
+import { db, incomeForecastTable, incomeSourcesTable } from "../../../lib/db/src/index.ts";
+
+const router: IRouter = Router();
+
+// ── Sources ───────────────────────────────────────────────────────────────────
+
+router.get("/income-sources", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(incomeSourcesTable)
+    .orderBy(asc(incomeSourcesTable.sortOrder), asc(incomeSourcesTable.id));
+  res.json(rows);
+});
+
+const SourceInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  type: z.string().trim().max(50).default("other"),
+  color: z.string().trim().max(30).default("#6366f1"),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+router.post("/income-sources", async (req, res): Promise<void> => {
+  const parsed = SourceInput.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const maxOrder = await db
+    .select({ sortOrder: incomeSourcesTable.sortOrder })
+    .from(incomeSourcesTable)
+    .orderBy(asc(incomeSourcesTable.sortOrder));
+  const nextOrder = maxOrder.length > 0 ? (maxOrder[maxOrder.length - 1]?.sortOrder ?? 0) + 1 : 0;
+
+  const [row] = await db
+    .insert(incomeSourcesTable)
+    .values({ ...parsed.data, sortOrder: nextOrder })
+    .returning();
+  res.json(row);
+});
+
+const SourcePatch = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  type: z.string().trim().max(50).optional(),
+  color: z.string().trim().max(30).optional(),
+  sortOrder: z.number().int().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+router.patch("/income-sources/:id", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid id." }); return; }
+
+  const parsed = SourcePatch.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const [row] = await db
+    .update(incomeSourcesTable)
+    .set(parsed.data)
+    .where(eq(incomeSourcesTable.id, id))
+    .returning();
+  if (!row) { res.status(404).json({ error: "Source not found." }); return; }
+  res.json(row);
+});
+
+router.delete("/income-sources/:id", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid id." }); return; }
+
+  // cascade deletes forecast rows via FK, but we do it explicitly for safety
+  await db.delete(incomeForecastTable).where(eq(incomeForecastTable.sourceId, id));
+  await db.delete(incomeSourcesTable).where(eq(incomeSourcesTable.id, id));
+  res.json({ ok: true });
+});
+
+// ── Forecast entries ──────────────────────────────────────────────────────────
+
+router.get("/income-forecast", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(incomeForecastTable)
+    .orderBy(asc(incomeForecastTable.sourceId), asc(incomeForecastTable.year));
+  res.json(rows);
+});
+
+const EntryInput = z.object({
+  sourceId: z.number().int().positive(),
+  year: z.number().int().min(2020).max(2100),
+  amount: z.number().nonnegative(),
+  note: z.string().trim().max(200).nullable().optional(),
+});
+
+const PutBody = z.object({
+  entries: z.array(EntryInput),
+});
+
+router.put("/income-forecast", async (req, res): Promise<void> => {
+  const parsed = PutBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  await db.delete(incomeForecastTable);
+
+  if (parsed.data.entries.length === 0) { res.json([]); return; }
+
+  const rows = await db
+    .insert(incomeForecastTable)
+    .values(
+      parsed.data.entries.map((e) => ({
+        sourceId: e.sourceId,
+        year: e.year,
+        amount: String(e.amount),
+        note: e.note ?? null,
+      })),
+    )
+    .returning();
+
+  res.json(rows);
+});
+
+export default router;

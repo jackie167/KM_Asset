@@ -13,3 +13,4 @@ export * from "./base-assets";
 export * from "./income-expense";
 export * from "./expense-forecast";
 export * from "./app-settings";
+export * from "./income-plan";
