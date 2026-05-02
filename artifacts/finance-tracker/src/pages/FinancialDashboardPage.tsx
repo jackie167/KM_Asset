@@ -166,27 +166,23 @@ type SummaryRow = {
 
 function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
   return (
-    <Card className="p-4 md:p-5">
+    <Card className="p-3 md:p-5">
       <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{title}</p>
       <div className="mt-3 divide-y divide-border">
         {rows.map((row) => {
           const content = (
-            <div className={`py-3 first:pt-0 last:pb-0 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{row.label}</p>
-                </div>
-                {row.loading ? (
-                  <div className="h-6 w-28 rounded bg-muted animate-pulse" />
-                ) : (
-                  <div className="min-w-0 text-right">
-                    <p className={`text-sm md:text-base font-bold tabular-nums break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
-                      {row.value}
-                    </p>
-                    {row.sub && <p className={`mt-1 text-xs font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
-                  </div>
-                )}
-              </div>
+            <div className={`py-2.5 first:pt-0 last:pb-0 space-y-0.5 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest leading-tight">{row.label}</p>
+              {row.loading ? (
+                <div className="h-5 w-20 rounded bg-muted animate-pulse" />
+              ) : (
+                <>
+                  <p className={`text-sm font-bold tabular-nums break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
+                    {row.value}
+                  </p>
+                  {row.sub && <p className={`text-[10px] font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
+                </>
+              )}
             </div>
           );
           return row.href ? <Link key={row.label} href={row.href}>{content}</Link> : <div key={row.label}>{content}</div>;
@@ -387,7 +383,7 @@ export default function FinancialDashboardPage() {
         {/* ── Tổng quan ─────────────────────────────────────────────────── */}
         <section className="space-y-2">
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng quan</p>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
 
             <SummaryPanel
               title="Tài sản"
