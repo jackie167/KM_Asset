@@ -207,6 +207,17 @@ export default function ExpenseTrackerPage() {
     },
   });
 
+  const saveActualMut = useMutation({
+    mutationFn: async ({ yr, needTotal, wantTotal }: { yr: number; needTotal: number; wantTotal: number }) => {
+      await fetch(`/api/expense-forecast/${yr}/actual`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actualNeed: needTotal, actualWant: wantTotal }),
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["expense-forecast"] }),
+  });
+
   const forecastRows = forecastQuery.data ?? [];
   const selectedForecast = useMemo(
     () => forecastRows.find((row) => row.year === selectedYear) ?? forecastRows.findLast((row) => row.year <= selectedYear) ?? forecastRows[0],
@@ -223,17 +234,29 @@ export default function ExpenseTrackerPage() {
   };
 
   const totalIncome = selectedForecast?.totalIncome ?? 0;
-  const annualBudget = alloc.want > 0 ? alloc.want : null;
   const availableYears = forecastRows.length > 0
     ? forecastRows.map((row) => row.year)
     : [2024, 2025, 2026, 2027, 2028];
 
   const totalSpent = summaryQuery.data?.totalSpent ?? 0;
+  const annualBudget = alloc.want > 0 ? alloc.want : null;
   const budgetUsed = annualBudget && annualBudget > 0 ? totalSpent / annualBudget : null;
   const remaining  = annualBudget != null ? annualBudget - totalSpent : null;
 
   const expenses   = expensesQuery.data ?? [];
   const byCategory = summaryQuery.data?.byCategory ?? [];
+
+  // Auto-save actual Need (= budget sub-items total) and actual Want (= real spending) to DB
+  useEffect(() => {
+    if (!selectedForecast || summaryQuery.isLoading || forecastQuery.isLoading) return;
+    if (alloc.needTotal <= 0 && totalSpent <= 0) return;
+    const alreadySaved =
+      selectedForecast.actualNeed === alloc.needTotal &&
+      selectedForecast.actualWant === totalSpent;
+    if (alreadySaved) return;
+    saveActualMut.mutate({ yr: selectedYear, needTotal: alloc.needTotal, wantTotal: totalSpent });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear, alloc.needTotal, totalSpent, summaryQuery.isLoading, forecastQuery.isLoading]);
 
   const handleSave = (data: { amount: number; category: string; note: string; occurredAt: string }) => {
     if (dialog.open && dialog.mode === "edit") updateMut.mutate({ id: dialog.expense.id, ...data });
@@ -463,12 +486,12 @@ export default function ExpenseTrackerPage() {
                     <td />
                   </tr>
                 ))}
-                {/* Want — highlighted */}
+                {/* Want — actual spending total */}
                 <tr className="bg-primary/5 hover:bg-primary/10">
                   <td className="px-4 py-2.5 font-bold text-primary">Want</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-primary">{fmt(alloc.want, hide)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-primary">{fmt(totalSpent, hide)}</td>
                   <td className="px-3 py-2.5 text-right text-primary text-xs font-semibold">
-                    {totalIncome > 0 ? fmtPct(alloc.want / totalIncome) : "—"}
+                    {totalIncome > 0 ? fmtPct(totalSpent / totalIncome) : "—"}
                   </td>
                 </tr>
                 {/* Want sub-items: actual spending by category */}
@@ -479,28 +502,11 @@ export default function ExpenseTrackerPage() {
                       <td className="px-4 py-2 pl-8 text-muted-foreground text-xs">{cat.icon} {cat.label}</td>
                       <td className="px-4 py-2 text-right tabular-nums text-xs text-muted-foreground">{fmt(spent, hide)}</td>
                       <td className="px-3 py-2 text-right text-xs text-muted-foreground">
-                        {alloc.want > 0 ? fmtPct(spent / alloc.want) : "—"}
+                        {totalSpent > 0 ? fmtPct(spent / totalSpent) : "—"}
                       </td>
                     </tr>
                   );
                 })}
-                {/* Want: Đã chi tổng + Còn lại */}
-                <tr className="bg-muted/10 hover:bg-muted/20">
-                  <td className="px-4 py-2 pl-8 text-muted-foreground text-xs">Tổng đã chi</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-xs font-medium">{fmt(totalSpent, hide)}</td>
-                  <td className="px-3 py-2 text-right text-xs text-muted-foreground">
-                    {alloc.want > 0 ? fmtPct(totalSpent / alloc.want) : "—"}
-                  </td>
-                </tr>
-                <tr className="bg-muted/10 hover:bg-muted/20">
-                  <td className="px-4 py-2 pl-8 text-xs font-semibold">Còn lại</td>
-                  <td className={`px-4 py-2 text-right tabular-nums text-xs font-semibold ${remaining != null && remaining < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                    {remaining != null ? fmt(remaining, hide) : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right text-xs text-muted-foreground">
-                    {alloc.want > 0 && remaining != null ? fmtPct(remaining / alloc.want) : "—"}
-                  </td>
-                </tr>
               </tbody>
             </table>
           </Card>

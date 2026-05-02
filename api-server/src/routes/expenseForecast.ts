@@ -175,4 +175,28 @@ router.put("/expense-forecast", async (req, res): Promise<void> => {
   res.json(rows.map(serialize));
 });
 
+router.patch("/expense-forecast/:year/actual", async (req, res): Promise<void> => {
+  const year = Number(req.params.year);
+  if (!Number.isInteger(year)) { res.status(400).json({ error: "Invalid year." }); return; }
+
+  const parsed = z.object({
+    actualNeed: z.number().nonnegative().nullable(),
+    actualWant: z.number().nonnegative().nullable(),
+  }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const { eq } = await import("drizzle-orm");
+  const [row] = await db
+    .update(expenseForecastTable)
+    .set({
+      actualNeed: parsed.data.actualNeed != null ? String(parsed.data.actualNeed) : null,
+      actualWant: parsed.data.actualWant != null ? String(parsed.data.actualWant) : null,
+    })
+    .where(eq(expenseForecastTable.year, year))
+    .returning();
+
+  if (!row) { res.status(404).json({ error: "Year not found." }); return; }
+  res.json(serialize(row));
+});
+
 export default router;
