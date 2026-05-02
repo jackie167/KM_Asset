@@ -426,6 +426,36 @@ export default function ExpenseTrackerPage() {
                     {totalIncome > 0 ? fmtPct(alloc.want / totalIncome) : "—"}
                   </td>
                 </tr>
+                {/* Want sub-items: actual spending by category */}
+                {CATEGORIES.map((cat) => {
+                  const spent = byCategory.find((b) => b.category === cat.key)?.amount ?? 0;
+                  return (
+                    <tr key={cat.key} className="bg-muted/10 hover:bg-muted/20">
+                      <td className="px-4 py-2 pl-8 text-muted-foreground text-xs">{cat.icon} {cat.label}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-xs text-muted-foreground">{fmt(spent, hide)}</td>
+                      <td className="px-3 py-2 text-right text-xs text-muted-foreground">
+                        {alloc.want > 0 ? fmtPct(spent / alloc.want) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* Want: Đã chi tổng + Còn lại */}
+                <tr className="bg-muted/10 hover:bg-muted/20">
+                  <td className="px-4 py-2 pl-8 text-muted-foreground text-xs">Tổng đã chi</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-xs font-medium">{fmt(totalSpent, hide)}</td>
+                  <td className="px-3 py-2 text-right text-xs text-muted-foreground">
+                    {alloc.want > 0 ? fmtPct(totalSpent / alloc.want) : "—"}
+                  </td>
+                </tr>
+                <tr className="bg-muted/10 hover:bg-muted/20">
+                  <td className="px-4 py-2 pl-8 text-xs font-semibold">Còn lại</td>
+                  <td className={`px-4 py-2 text-right tabular-nums text-xs font-semibold ${remaining != null && remaining < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                    {remaining != null ? fmt(remaining, hide) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right text-xs text-muted-foreground">
+                    {alloc.want > 0 && remaining != null ? fmtPct(remaining / alloc.want) : "—"}
+                  </td>
+                </tr>
                 {/* Total */}
                 <tr className="border-t-2 border-border">
                   <td className="px-4 py-2.5 font-bold">Total</td>
