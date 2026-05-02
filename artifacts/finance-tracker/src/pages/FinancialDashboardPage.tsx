@@ -171,7 +171,7 @@ function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
       <div className="mt-3 divide-y divide-border">
         {rows.map((row) => {
           const content = (
-            <div className={`py-3.5 first:pt-0 last:pb-0 space-y-1 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
+            <div className={`py-5 first:pt-0 last:pb-0 space-y-1.5 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
               <p className="text-[11px] text-muted-foreground uppercase tracking-widest leading-tight">{row.label}</p>
               {row.loading ? (
                 <div className="h-6 w-24 rounded bg-muted animate-pulse" />
@@ -493,7 +493,7 @@ export default function FinancialDashboardPage() {
             <div className="space-y-5">
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Chỉ số tổng quan</p>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {[
                   {
                     label: "Tỷ lệ tài sản tài chính / Tổng",
@@ -520,7 +520,7 @@ export default function FinancialDashboardPage() {
                     desc: "10%/năm là mức sinh lời dài hạn hợp lý",
                   },
                 ].map((row) => (
-                  <div key={row.label} className="flex items-start justify-between gap-4 border-b border-border/20 pb-3 last:border-0 last:pb-0">
+                  <div key={row.label} className="flex items-start justify-between gap-4 border-b border-border/20 pb-4 last:border-0 last:pb-0">
                     <div className="min-w-0">
                       <p className="text-xs text-foreground font-medium">{row.label}</p>
                       <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{row.desc}</p>
