@@ -187,6 +187,10 @@ export default function WealthAllocationPage() {
       navigate("/assets/type/financial");
       return;
     }
+    if (["cash", "stock", "gold", "fund", "crypto"].includes(type)) {
+      navigate(`/assets/type/${encodeURIComponent(type)}`);
+      return;
+    }
     navigate(`/wealth-allocation/type/${encodeURIComponent(type)}`);
   };
 

@@ -6,6 +6,7 @@ const FINANCIAL_TYPES = new Set(["financial"]);
 const REAL_ESTATE_TYPES = new Set(["real_estate", "realestate", "real estate"]);
 const ASSET_RETURN_SETTING_KEY = "asset_forecast_asset_returns";
 const FINANCIAL_TRADE_TYPES = new Set(["cash", "stock", "gold", "fund", "crypto"]);
+const FINANCIAL_DETAIL_ORDER = ["cash", "stock", "gold", "fund", "crypto"];
 
 type ForecastTrade = {
   id: number;
@@ -269,6 +270,46 @@ export async function fetchFinancialDetailHoldings(): Promise<HoldingItem[]> {
   return fetchPortfolioInvestmentHoldings();
 }
 
+function groupFinancialHoldingsByType(holdings: HoldingItem[]): HoldingItem[] {
+  const byType = new Map<string, HoldingItem>();
+
+  for (const holding of holdings) {
+    const type = normalizeWealthType(holding.type);
+    const currentValue = holding.currentValue ?? 0;
+    if (currentValue <= 0) continue;
+    const existing = byType.get(type);
+    if (existing) {
+      existing.currentValue = (existing.currentValue ?? 0) + currentValue;
+      existing.currentPrice = existing.currentValue;
+      existing.manualPrice = existing.currentValue;
+      existing.costOfCapital = (existing.costOfCapital ?? 0) + (holding.costOfCapital ?? 0);
+      continue;
+    }
+
+    byType.set(type, {
+      id: -10_000 - byType.size,
+      symbol: type,
+      type,
+      quantity: 1,
+      currentPrice: currentValue,
+      currentValue,
+      change: null,
+      changePercent: null,
+      manualPrice: currentValue,
+      costOfCapital: holding.costOfCapital ?? null,
+    });
+  }
+
+  return Array.from(byType.values()).sort((left, right) => {
+    const leftIndex = FINANCIAL_DETAIL_ORDER.indexOf(left.type);
+    const rightIndex = FINANCIAL_DETAIL_ORDER.indexOf(right.type);
+    if (leftIndex !== -1 || rightIndex !== -1) {
+      return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
+    }
+    return left.type.localeCompare(right.type);
+  });
+}
+
 export async function fetchWealthAllocationHoldings() {
   const [baseHoldings, investmentHoldings, returnInputs, forecastTrades] = await Promise.all([
     fetchBaseAssetHoldings(),
@@ -282,20 +323,5 @@ export async function fetchWealthAllocationHoldings() {
     .map((holding) => applyMonthlyForecastValue(holding, returnInputs));
   const currentFixedHoldings = applyCurrentYearTrades(sheetHoldings, forecastTrades);
 
-  if (investmentHoldings.length === 0) return currentFixedHoldings;
-
-  const financialTotal = investmentHoldings.reduce((sum, h) => sum + (h.currentValue ?? 0), 0);
-  const financialHolding: HoldingItem = {
-    id: -1,
-    symbol: "Financial",
-    type: "financial",
-    quantity: 1,
-    currentPrice: financialTotal,
-    currentValue: financialTotal,
-    change: null,
-    changePercent: null,
-    manualPrice: financialTotal,
-  };
-
-  return [...currentFixedHoldings, financialHolding];
+  return [...currentFixedHoldings, ...groupFinancialHoldingsByType(investmentHoldings)];
 }
