@@ -505,13 +505,13 @@ export default function AssetForecastPage() {
     return new Map(freeCashRows.map((row) => [row.year, row.freeCash + row.totalInterest]));
   }, [freeCashRows]);
 
-  // actualBalance(year N) → added to Spending Fund start of year N+1
+  // actualBalance(year N) → added to Spending Fund at start of year N (reflects in year N column)
   const spendingFundExtraByYear = useMemo(() => {
     const rows = expenseForecastQuery.data ?? [];
     const result = new Map<number, number>();
     for (const row of rows) {
       if (row.actualBalance != null && row.actualBalance !== 0) {
-        result.set(row.year + 1, (result.get(row.year + 1) ?? 0) + row.actualBalance);
+        result.set(row.year, (result.get(row.year) ?? 0) + row.actualBalance);
       }
     }
     return result;
