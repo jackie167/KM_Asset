@@ -180,6 +180,29 @@ export async function ensureDatabaseSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_forecast (
+      id serial PRIMARY KEY,
+      year integer NOT NULL,
+      income numeric(22, 2) NOT NULL DEFAULT 0,
+      other_income numeric(22, 2) NOT NULL DEFAULT 0,
+      investment_ratio numeric(10, 6) NOT NULL DEFAULT 30,
+      need_living numeric(22, 2) NOT NULL DEFAULT 0,
+      need_tuition numeric(22, 2) NOT NULL DEFAULT 0,
+      need_allowance numeric(22, 2) NOT NULL DEFAULT 0,
+      need_maintenance numeric(22, 2) NOT NULL DEFAULT 0,
+      want_budget numeric(22, 2) NOT NULL DEFAULT 0,
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS expense_forecast_year_idx
+      ON expense_forecast (year)
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS forecast_loans (
       id serial PRIMARY KEY,
       asset_type text NOT NULL,
