@@ -39,6 +39,11 @@ function isFinancialHolding(holding: Pick<HoldingItem, "type" | "symbol">) {
   return normalizeAssetType(holding.type) === "financial" || normalizeSymbol(holding.symbol) === "FINANCIAL";
 }
 
+const INVESTMENT_ASSET_TYPES = new Set(["financial", "cash", "stock", "gold", "fund", "crypto"]);
+function isInvestmentHolding(holding: Pick<HoldingItem, "type">) {
+  return INVESTMENT_ASSET_TYPES.has(normalizeAssetType(holding.type));
+}
+
 type DashboardTransaction = {
   side: string;
   status: string;
@@ -312,11 +317,14 @@ export default function FinancialDashboardPage() {
     hideValues ? "****" : full ? formatVNDFull(v) : formatVND(v);
 
   const totalAssetPnl = useMemo(() => {
+    // Exclude all investment/financial types from both sides to avoid counting portfolio P/L twice.
+    // wealthHoldings = non-financial base (forecast) + portfolio by type (cash/stock/etc.)
+    // We want only the non-financial base portion; pnl already captures investment P/L.
     const currentFixedValue = wealthHoldings.reduce((sum, holding) => {
-      return isFinancialHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
+      return isInvestmentHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
     }, 0);
     const baseFixedValue = (baseAssetsQuery.data ?? []).reduce((sum, holding) => {
-      return isFinancialHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
+      return isInvestmentHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
     }, 0);
     return currentFixedValue - baseFixedValue + pnl;
   }, [baseAssetsQuery.data, pnl, wealthHoldings]);
