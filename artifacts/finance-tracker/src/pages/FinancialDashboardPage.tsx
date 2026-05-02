@@ -172,15 +172,15 @@ function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
         {rows.map((row) => {
           const content = (
             <div className={`py-2.5 first:pt-0 last:pb-0 space-y-0.5 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-widest leading-tight">{row.label}</p>
+              <p className="text-[11px] text-muted-foreground uppercase tracking-widest leading-tight">{row.label}</p>
               {row.loading ? (
-                <div className="h-5 w-20 rounded bg-muted animate-pulse" />
+                <div className="h-6 w-24 rounded bg-muted animate-pulse" />
               ) : (
                 <>
-                  <p className={`text-sm font-bold tabular-nums break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
+                  <p className={`text-base font-bold tabular-nums break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
                     {row.value}
                   </p>
-                  {row.sub && <p className={`text-[10px] font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
+                  {row.sub && <p className={`text-xs font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
                 </>
               )}
             </div>
