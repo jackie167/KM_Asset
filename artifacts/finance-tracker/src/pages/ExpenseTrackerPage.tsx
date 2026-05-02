@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "@/pages/PageHeader";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatVNDFull } from "@/pages/assets/utils";
-import { fetchIncomeExpenseCashflowData } from "@/lib/asset-forecast";
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -19,11 +19,6 @@ const CATEGORIES: { key: string; label: string; icon: string }[] = [
 
 const CAT_MAP = Object.fromEntries(CATEGORIES.map((c) => [c.key, c]));
 
-const LS = {
-  get: (k: string, d: number) => { const v = localStorage.getItem(k); return v != null ? Number(v) : d; },
-  set: (k: string, v: number) => localStorage.setItem(k, String(v)),
-};
-
 // ─── types ───────────────────────────────────────────────────────────────────
 
 type Expense = {
@@ -35,6 +30,24 @@ type Summary = {
   byCategory: { category: string; label: string; amount: number; count: number }[];
 };
 type DialogState = { open: false } | { open: true; mode: "add" } | { open: true; mode: "edit"; expense: Expense };
+type ExpenseForecastRow = {
+  id?: number;
+  year: number;
+  income: number;
+  otherIncome: number;
+  totalIncome: number;
+  investmentRatio: number;
+  investmentAmount: number;
+  availableAfterInvestment: number;
+  needLiving: number;
+  needTuition: number;
+  needAllowance: number;
+  needMaintenance: number;
+  needTotal: number;
+  wantBudget: number;
+  spendingFundChange: number;
+  note: string | null;
+};
 
 // ─── api ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +74,33 @@ async function updateExpense(id: number, body: Partial<Omit<Expense, "id" | "cre
 async function deleteExpense(id: number): Promise<void> {
   const res = await fetch(`/api/expenses/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete expense");
+}
+async function getExpenseForecast(): Promise<ExpenseForecastRow[]> {
+  const res = await fetch("/api/expense-forecast");
+  if (!res.ok) throw new Error("Failed to load expense forecast");
+  return res.json();
+}
+async function saveExpenseForecast(rows: ExpenseForecastRow[]): Promise<ExpenseForecastRow[]> {
+  const res = await fetch("/api/expense-forecast", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      rows: rows.map((row) => ({
+        year: row.year,
+        income: row.income,
+        otherIncome: row.otherIncome,
+        investmentRatio: row.investmentRatio,
+        needLiving: row.needLiving,
+        needTuition: row.needTuition,
+        needAllowance: row.needAllowance,
+        needMaintenance: row.needMaintenance,
+        wantBudget: row.wantBudget,
+        note: row.note,
+      })),
+    }),
+  });
+  if (!res.ok) throw new Error("Failed to save expense forecast");
+  return res.json();
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -121,80 +161,20 @@ function ExpenseDialog({ state, onClose, onSave }: {
   );
 }
 
-// ─── allocation settings dialog ───────────────────────────────────────────────
-
-function AllocationSettingsDialog({ onClose, values, onChange }: {
-  onClose: () => void;
-  values: { invest: number; needTotal: number; needLiving: number; needTuition: number; needAllowance: number; needMaint: number; want: number };
-  onChange: (k: string, v: number) => void;
-}) {
-  const fields: { key: string; label: string }[] = [
-    { key: "invest",       label: "Investment (năm)" },
-    { key: "needTotal",    label: "Need — Tổng (năm)" },
-    { key: "needLiving",   label: "  Living cost" },
-    { key: "needTuition",  label: "  Tuition" },
-    { key: "needAllowance",label: "  Allowance" },
-    { key: "needMaint",    label: "  Maintenance" },
-    { key: "want",         label: "Want (năm) ← budget" },
-  ];
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <Card className="w-full max-w-sm p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-sm">Cài đặt phân bổ thu nhập</h3>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">✕</button>
-        </div>
-        <div className="space-y-3">
-          {fields.map(({ key, label }) => (
-            <div key={key} className="space-y-1">
-              <label className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</label>
-              <input
-                type="number"
-                value={(values as any)[key]}
-                onChange={(e) => onChange(key, Number(e.target.value))}
-                className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-          ))}
-        </div>
-        <Button size="sm" className="w-full" onClick={onClose}>Xong</Button>
-      </Card>
-    </div>
-  );
-}
-
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 export default function ExpenseTrackerPage() {
   const [year, setYear] = useState(currentYear);
   const [hide, setHide] = useState(() => localStorage.getItem("hide_values") === "1");
   const [dialog, setDialog] = useState<DialogState>({ open: false });
-  const [showAllocSettings, setShowAllocSettings] = useState(false);
+  const [forecastEditing, setForecastEditing] = useState(false);
+  const [forecastDraft, setForecastDraft] = useState<Record<number, ExpenseForecastRow>>({});
   const qc = useQueryClient();
-
-  // Allocation config (localStorage)
-  const [alloc, setAlloc] = useState(() => ({
-    invest:        LS.get("exp_alloc_invest",   888832200),
-    needTotal:     LS.get("exp_alloc_need",     1064155640),
-    needLiving:    LS.get("exp_alloc_living",   420000000),
-    needTuition:   LS.get("exp_alloc_tuition",  204000000),
-    needAllowance: LS.get("exp_alloc_allowance",360000000),
-    needMaint:     LS.get("exp_alloc_maint",    80155640),
-    want:          LS.get("exp_alloc_want",     1009786160),
-  }));
-
-  const handleAllocChange = (key: string, value: number) => {
-    LS.set(`exp_alloc_${key === "invest" ? "invest" : key === "needTotal" ? "need" : key === "needLiving" ? "living" : key === "needTuition" ? "tuition" : key === "needAllowance" ? "allowance" : key === "needMaint" ? "maint" : "want"}`, value);
-    setAlloc((prev) => ({ ...prev, [key]: value }));
-  };
 
   const expensesQuery = useQuery({ queryKey: ["expenses", year], queryFn: () => getExpenses(year) });
   const summaryQuery  = useQuery({ queryKey: ["expenses-summary", year], queryFn: () => getSummary(year) });
   const selectedYear = Number(year);
-  const cashflowQuery = useQuery({
-    queryKey: ["income-expense-cashflow", selectedYear],
-    queryFn: () => fetchIncomeExpenseCashflowData(selectedYear),
-  });
+  const forecastQuery = useQuery({ queryKey: ["expense-forecast"], queryFn: getExpenseForecast });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["expenses", year] });
@@ -204,13 +184,34 @@ export default function ExpenseTrackerPage() {
   const createMut = useMutation({ mutationFn: createExpense, onSuccess: () => { invalidate(); setDialog({ open: false }); } });
   const updateMut = useMutation({ mutationFn: ({ id, ...body }: { id: number } & Partial<Omit<Expense,"id"|"createdAt">>) => updateExpense(id, body), onSuccess: () => { invalidate(); setDialog({ open: false }); } });
   const deleteMut = useMutation({ mutationFn: deleteExpense, onSuccess: invalidate });
+  const saveForecastMut = useMutation({
+    mutationFn: saveExpenseForecast,
+    onSuccess: () => {
+      setForecastEditing(false);
+      qc.invalidateQueries({ queryKey: ["expense-forecast"] });
+    },
+  });
 
-  // Budget = annual Want (no monthly division)
+  const forecastRows = forecastQuery.data ?? [];
+  const selectedForecast = useMemo(
+    () => forecastRows.find((row) => row.year === selectedYear) ?? forecastRows.findLast((row) => row.year <= selectedYear) ?? forecastRows[0],
+    [forecastRows, selectedYear]
+  );
+  const alloc = {
+    invest: selectedForecast?.investmentAmount ?? 0,
+    needTotal: selectedForecast?.needTotal ?? 0,
+    needLiving: selectedForecast?.needLiving ?? 0,
+    needTuition: selectedForecast?.needTuition ?? 0,
+    needAllowance: selectedForecast?.needAllowance ?? 0,
+    needMaint: selectedForecast?.needMaintenance ?? 0,
+    want: selectedForecast?.wantBudget ?? 0,
+  };
+
+  const totalIncome = selectedForecast?.totalIncome ?? 0;
   const annualBudget = alloc.want > 0 ? alloc.want : null;
-  const income = cashflowQuery.data?.income ?? 0;
-
-  // Total = income from income_expense DB.
-  const totalIncome = income > 0 ? income : alloc.invest + alloc.needTotal + alloc.want;
+  const availableYears = forecastRows.length > 0
+    ? forecastRows.map((row) => row.year)
+    : [2024, 2025, 2026, 2027, 2028];
 
   const totalSpent = summaryQuery.data?.totalSpent ?? 0;
   const budgetUsed = annualBudget && annualBudget > 0 ? totalSpent / annualBudget : null;
@@ -224,6 +225,43 @@ export default function ExpenseTrackerPage() {
     else createMut.mutate(data as any);
   };
 
+  const beginForecastEdit = () => {
+    setForecastDraft(Object.fromEntries(forecastRows.map((row) => [row.year, { ...row }])));
+    setForecastEditing(true);
+  };
+
+  const updateForecastDraft = (year: number, key: keyof ExpenseForecastRow, value: string) => {
+    setForecastDraft((current) => {
+      const row = current[year];
+      if (!row) return current;
+      const numericValue = Number(value.replace(/[^\d.-]/g, ""));
+      const next = {
+        ...row,
+        [key]: Number.isFinite(numericValue) ? numericValue : 0,
+      };
+      const totalIncome = next.income + next.otherIncome;
+      const investmentAmount = totalIncome * (next.investmentRatio / 100);
+      const availableAfterInvestment = totalIncome - investmentAmount;
+      const needTotal = next.needLiving + next.needTuition + next.needAllowance + next.needMaintenance;
+      const spendingFundChange = availableAfterInvestment - needTotal - next.wantBudget;
+      return {
+        ...current,
+        [year]: {
+          ...next,
+          totalIncome,
+          investmentAmount,
+          availableAfterInvestment,
+          needTotal,
+          spendingFundChange,
+        },
+      };
+    });
+  };
+
+  const saveForecastDraft = () => {
+    saveForecastMut.mutate(Object.values(forecastDraft).sort((a, b) => a.year - b.year));
+  };
+
   const barColor = (pct: number | null) =>
     !pct ? "bg-primary" : pct >= 1 ? "bg-red-500" : pct >= 0.8 ? "bg-amber-400" : "bg-emerald-500";
 
@@ -235,7 +273,7 @@ export default function ExpenseTrackerPage() {
         inlineRight={
           <select value={year} onChange={(e) => setYear(e.target.value)}
             className="rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
-            {[2024, 2025, 2026, 2027, 2028].map((y) => (
+            {availableYears.map((y) => (
               <option key={y} value={String(y)}>{y}</option>
             ))}
           </select>
@@ -248,6 +286,89 @@ export default function ExpenseTrackerPage() {
       />
 
       <main className="w-full md:max-w-5xl xl:max-w-7xl mx-auto px-3 sm:px-4 md:px-6 xl:px-8 py-6 space-y-6">
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Forecast chi tiêu</p>
+              <p className="text-xs text-muted-foreground">Thu nhập trừ phần đầu tư, sau đó phân bổ Need / Want / Spending fund.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {forecastEditing ? (
+                <>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setForecastEditing(false)}>Huỷ</Button>
+                  <Button size="sm" className="h-8 text-xs" disabled={saveForecastMut.isPending} onClick={saveForecastDraft}>
+                    {saveForecastMut.isPending ? "Đang lưu..." : "Lưu"}
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={beginForecastEdit} disabled={!forecastRows.length}>
+                  Edit
+                </Button>
+              )}
+            </div>
+          </div>
+          <Card className="overflow-x-auto">
+            {forecastQuery.isLoading ? (
+              <div className="p-6 text-sm text-muted-foreground">Loading...</div>
+            ) : forecastRows.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">Chưa có dữ liệu forecast chi tiêu.</div>
+            ) : (() => {
+              const inputCls = "h-7 w-full text-right text-xs tabular-nums";
+              type DataRow = {
+                label: string;
+                field?: keyof ExpenseForecastRow;
+                render: (row: ExpenseForecastRow, editRow: ExpenseForecastRow, yr: number) => React.ReactNode;
+                className?: string;
+                indent?: boolean;
+              };
+              const dataRows: DataRow[] = [
+                { label: "Income",          field: "income",          className: "", render: (r, e, yr) => forecastEditing ? <Input value={String(e.income)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "income", ev.target.value)} /> : fmt(r.income, hide) },
+                { label: "Other income",    field: "otherIncome",     className: "", render: (r, e, yr) => forecastEditing ? <Input value={String(e.otherIncome)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "otherIncome", ev.target.value)} /> : fmt(r.otherIncome, hide) },
+                { label: "Invest %",        field: "investmentRatio", className: "", render: (r, e, yr) => forecastEditing ? <Input value={String(e.investmentRatio)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "investmentRatio", ev.target.value)} /> : `${r.investmentRatio.toFixed(1)}%` },
+                { label: "Investment",      className: "text-emerald-400 font-semibold", render: (r, e) => fmt(e.investmentAmount, hide) },
+                { label: "After invest",    className: "text-muted-foreground", render: (r, e) => fmt(e.availableAfterInvestment, hide) },
+                { label: "Need",            className: "font-semibold", render: (r, e) => fmt(e.needTotal, hide) },
+                { label: "· Living",        field: "needLiving",      indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needLiving)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needLiving", ev.target.value)} /> : fmt(r.needLiving, hide) },
+                { label: "· Tuition",       field: "needTuition",     indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needTuition)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needTuition", ev.target.value)} /> : fmt(r.needTuition, hide) },
+                { label: "· Allowance",     field: "needAllowance",   indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needAllowance)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needAllowance", ev.target.value)} /> : fmt(r.needAllowance, hide) },
+                { label: "· Maintenance",   field: "needMaintenance", indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needMaintenance)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needMaintenance", ev.target.value)} /> : fmt(r.needMaintenance, hide) },
+                { label: "Want",            field: "wantBudget",      className: "text-primary font-bold", render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantBudget)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantBudget", ev.target.value)} /> : fmt(r.wantBudget, hide) },
+                { label: "Spending fund Δ", className: "", render: (r, e) => <span className={e.spendingFundChange >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(e.spendingFundChange, hide)}</span> },
+              ];
+              return (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/60 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <th className="px-4 py-2.5 text-left font-medium sticky left-0 bg-card w-28 min-w-[7rem]">Chỉ số</th>
+                      {forecastRows.map((r) => (
+                        <th key={r.year} className={`px-3 py-2.5 text-right font-medium min-w-[7rem] ${r.year === selectedYear ? "text-primary" : ""}`}>
+                          {r.year}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {dataRows.map((dr) => (
+                      <tr key={dr.label} className={dr.indent ? "bg-muted/10" : "hover:bg-muted/20"}>
+                        <td className={`px-4 py-2 sticky left-0 bg-card whitespace-nowrap text-muted-foreground ${dr.indent ? "pl-7 text-[10px]" : "font-medium"}`}>
+                          {dr.label}
+                        </td>
+                        {forecastRows.map((r) => {
+                          const editRow = forecastEditing ? forecastDraft[r.year] ?? r : r;
+                          return (
+                            <td key={r.year} className={`px-3 py-2 text-right tabular-nums ${r.year === selectedYear ? "bg-primary/5" : ""} ${dr.className ?? ""}`}>
+                              {dr.render(r, editRow, r.year)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
+          </Card>
+        </section>
 
         {/* ── Phân bổ + Want Budget (side by side on landscape) ───────────── */}
         <div className="grid md:grid-cols-2 gap-6 items-start">
@@ -256,7 +377,7 @@ export default function ExpenseTrackerPage() {
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Phân bổ thu nhập {year}</p>
-            <button type="button" onClick={() => setShowAllocSettings(true)}
+            <button type="button" onClick={beginForecastEdit}
               className="text-[10px] text-muted-foreground hover:text-foreground border border-border/50 rounded px-2 py-0.5 transition-colors">
               Chỉnh sửa
             </button>
@@ -314,9 +435,9 @@ export default function ExpenseTrackerPage() {
               </tbody>
             </table>
           </Card>
-          {income > 0 && (
+          {selectedForecast && (
             <p className="text-[11px] text-muted-foreground">
-              Total lấy từ income_expense năm {cashflowQuery.data?.year ?? year}
+              Dữ liệu lấy từ expense_forecast năm {selectedForecast.year}
             </p>
           )}
         </section>
@@ -450,13 +571,6 @@ export default function ExpenseTrackerPage() {
       </main>
 
       <ExpenseDialog state={dialog} onClose={() => setDialog({ open: false })} onSave={handleSave} />
-      {showAllocSettings && (
-        <AllocationSettingsDialog
-          values={alloc}
-          onChange={handleAllocChange}
-          onClose={() => setShowAllocSettings(false)}
-        />
-      )}
     </div>
   );
 }
