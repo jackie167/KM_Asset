@@ -43,6 +43,11 @@ function serialize(row: typeof expenseForecastTable.$inferSelect) {
   const wantCategoryTotal = wantShopping + wantTravel + wantSupport + wantPersonal + wantOther;
   const wantBudget = wantCategoryTotal > 0 ? wantCategoryTotal : num(row.wantBudget);
   const spendingFundChange = availableAfterInvestment - needTotal - wantBudget;
+  const actualNeed = row.actualNeed != null ? num(row.actualNeed) : null;
+  const actualWant = row.actualWant != null ? num(row.actualWant) : null;
+  const actualBalance = (actualNeed != null || actualWant != null)
+    ? availableAfterInvestment - (actualNeed ?? needTotal) - (actualWant ?? wantBudget)
+    : null;
 
   return {
     id: row.id,
@@ -51,6 +56,7 @@ function serialize(row: typeof expenseForecastTable.$inferSelect) {
     needLiving, needTuition, needAllowance, needMaintenance, needTotal,
     wantShopping, wantTravel, wantSupport, wantPersonal, wantOther,
     wantBudget, spendingFundChange,
+    actualNeed, actualWant, actualBalance,
     note: row.note,
   };
 }
@@ -98,6 +104,8 @@ const RowInput = z.object({
   needMaintenance: z.number().nonnegative().default(0),
   wantBudget: z.number().nonnegative().default(0),
   wantShopping: z.number().nonnegative().default(0),
+  actualNeed: z.number().nonnegative().nullable().optional(),
+  actualWant: z.number().nonnegative().nullable().optional(),
   wantTravel: z.number().nonnegative().default(0),
   wantSupport: z.number().nonnegative().default(0),
   wantPersonal: z.number().nonnegative().default(0),
@@ -158,6 +166,8 @@ router.put("/expense-forecast", async (req, res): Promise<void> => {
       wantSupport: String(row.wantSupport),
       wantPersonal: String(row.wantPersonal),
       wantOther: String(row.wantOther),
+      actualNeed: row.actualNeed != null ? String(row.actualNeed) : null,
+      actualWant: row.actualWant != null ? String(row.actualWant) : null,
       note: row.note ?? null,
     })))
     .returning();

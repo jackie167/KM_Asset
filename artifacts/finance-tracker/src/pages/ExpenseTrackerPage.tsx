@@ -45,6 +45,9 @@ type ExpenseForecastRow = {
   needMaintenance: number;
   needTotal: number;
   wantBudget: number;
+  actualNeed: number | null;
+  actualWant: number | null;
+  actualBalance: number | null;
   wantShopping: number;
   wantTravel: number;
   wantSupport: number;
@@ -105,6 +108,8 @@ async function saveExpenseForecast(rows: ExpenseForecastRow[]): Promise<ExpenseF
         wantSupport:  row.wantSupport  ?? 0,
         wantPersonal: row.wantPersonal ?? 0,
         wantOther:    row.wantOther    ?? 0,
+        actualNeed:   row.actualNeed   ?? null,
+        actualWant:   row.actualWant   ?? null,
         note: row.note,
       })),
     }),
@@ -255,9 +260,9 @@ export default function ExpenseTrackerPage() {
         const su = prev.wantSupport  * f;
         const p = prev.wantPersonal * f;
         const o = prev.wantOther    * f;
-        draft[row.year] = { ...row, wantShopping: s, wantTravel: t, wantSupport: su, wantPersonal: p, wantOther: o, wantBudget: s + t + su + p + o };
+        draft[row.year] = { ...row, wantShopping: s, wantTravel: t, wantSupport: su, wantPersonal: p, wantOther: o, wantBudget: s + t + su + p + o, actualNeed: row.actualNeed ?? null, actualWant: row.actualWant ?? null, actualBalance: row.actualBalance ?? null };
       } else {
-        draft[row.year] = { ...row, wantShopping: shopping, wantTravel: travel, wantSupport: support, wantPersonal: personal, wantOther: other };
+        draft[row.year] = { ...row, wantShopping: shopping, wantTravel: travel, wantSupport: support, wantPersonal: personal, wantOther: other, actualNeed: row.actualNeed ?? null, actualWant: row.actualWant ?? null, actualBalance: row.actualBalance ?? null };
       }
     }
     setForecastDraft(draft);
@@ -268,11 +273,11 @@ export default function ExpenseTrackerPage() {
     setForecastDraft((current) => {
       const row = current[year];
       if (!row) return current;
+      const isNullable = key === "actualNeed" || key === "actualWant";
       const numericValue = Number(value.replace(/[^\d.-]/g, ""));
-      const next = {
-        ...row,
-        [key]: Number.isFinite(numericValue) ? numericValue : 0,
-      };
+      const fieldValue = (value.trim() === "" && isNullable) ? null
+        : Number.isFinite(numericValue) ? numericValue : (isNullable ? null : 0);
+      const next = { ...row, [key]: fieldValue };
       const totalIncome = next.income + next.otherIncome;
       const investmentAmount = totalIncome * (next.investmentRatio / 100);
       const availableAfterInvestment = totalIncome - investmentAmount;
@@ -290,6 +295,9 @@ export default function ExpenseTrackerPage() {
           needTotal,
           wantBudget,
           spendingFundChange,
+          actualBalance: (next.actualNeed != null || next.actualWant != null)
+            ? availableAfterInvestment - (next.actualNeed ?? needTotal) - (next.actualWant ?? wantBudget)
+            : null,
         },
       };
     });
@@ -376,6 +384,9 @@ export default function ExpenseTrackerPage() {
                 { label: "· Personal",      field: "wantPersonal", indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantPersonal)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantPersonal", ev.target.value)} /> : fmt(r.wantPersonal, hide) },
                 { label: "· Other",         field: "wantOther",    indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantOther)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantOther", ev.target.value)} /> : fmt(r.wantOther, hide) },
                 { label: "Spending fund Δ", className: "", render: (r, e) => <span className={e.spendingFundChange >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(e.spendingFundChange, hide)}</span> },
+                { label: "Thực tế Need",   className: "text-muted-foreground", render: (r, e, yr) => forecastEditing ? <Input value={e.actualNeed != null ? String(e.actualNeed) : ""} inputMode="decimal" placeholder="—" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "actualNeed", ev.target.value)} /> : (r.actualNeed != null ? fmt(r.actualNeed, hide) : <span className="text-muted-foreground/40">—</span>) },
+                { label: "Thực tế Want",   className: "text-muted-foreground", render: (r, e, yr) => forecastEditing ? <Input value={e.actualWant != null ? String(e.actualWant) : ""} inputMode="decimal" placeholder="—" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "actualWant", ev.target.value)} /> : (r.actualWant != null ? fmt(r.actualWant, hide) : <span className="text-muted-foreground/40">—</span>) },
+                { label: "Số dư thực tế",  className: "font-semibold", render: (r, e) => e.actualBalance != null ? <span className={e.actualBalance >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(e.actualBalance, hide)}</span> : <span className="text-muted-foreground/40">—</span> },
               ];
               return (
                 <table className="w-full text-xs">

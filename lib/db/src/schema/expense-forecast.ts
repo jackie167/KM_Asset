@@ -18,6 +18,8 @@ export const expenseForecastTable = pgTable(
     wantSupport: numeric("want_support", { precision: 22, scale: 2 }).notNull().default("0"),
     wantPersonal: numeric("want_personal", { precision: 22, scale: 2 }).notNull().default("0"),
     wantOther: numeric("want_other", { precision: 22, scale: 2 }).notNull().default("0"),
+    actualNeed: numeric("actual_need", { precision: 22, scale: 2 }),
+    actualWant: numeric("actual_want", { precision: 22, scale: 2 }),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
