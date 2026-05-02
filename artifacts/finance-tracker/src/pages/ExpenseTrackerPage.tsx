@@ -47,7 +47,7 @@ type ExpenseForecastRow = {
   wantBudget: number;
   actualNeed: number | null;
   actualWant: number | null;
-  actualBalance: number;
+  actualBalance: number | null;
   wantShopping: number;
   wantTravel: number;
   wantSupport: number;
@@ -319,7 +319,7 @@ export default function ExpenseTrackerPage() {
           needTotal,
           wantBudget,
           spendingFundChange,
-          actualBalance: availableAfterInvestment - (next.actualNeed ?? needTotal) - (next.actualWant ?? wantBudget),
+          actualBalance: null, // computed inline from availableAfterInvestment at render time
         },
       };
     });
@@ -408,7 +408,7 @@ export default function ExpenseTrackerPage() {
                 { label: "Spending fund Δ", className: "", render: (r, e) => <span className={e.spendingFundChange >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(e.spendingFundChange, hide)}</span> },
                 { label: "Thực tế Need",   className: "text-muted-foreground", render: (r, e, yr) => forecastEditing ? <Input value={e.actualNeed != null ? String(e.actualNeed) : ""} inputMode="decimal" placeholder={fmt(r.needTotal, hide)} className={inputCls} onChange={(ev) => updateForecastDraft(yr, "actualNeed", ev.target.value)} /> : (r.actualNeed != null ? fmt(r.actualNeed, hide) : <span className="text-muted-foreground/40">{fmt(r.needTotal, hide)}</span>) },
                 { label: "Thực tế Want",   className: "text-muted-foreground", render: (r, e, yr) => forecastEditing ? <Input value={e.actualWant != null ? String(e.actualWant) : ""} inputMode="decimal" placeholder={fmt(r.wantBudget, hide)} className={inputCls} onChange={(ev) => updateForecastDraft(yr, "actualWant", ev.target.value)} /> : (r.actualWant != null ? fmt(r.actualWant, hide) : <span className="text-muted-foreground/40">{fmt(r.wantBudget, hide)}</span>) },
-                { label: "Số dư thực tế",  className: "font-semibold", render: (r, e) => <span className={e.actualBalance >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(e.actualBalance, hide)}</span> },
+                { label: "Số dư thực tế",  className: "font-semibold", render: (r, e) => { const bal = e.actualBalance ?? (e.availableAfterInvestment - (e.actualNeed ?? e.needTotal) - (e.actualWant ?? e.wantBudget)); return <span className={bal >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(bal, hide)}</span>; } },
               ];
               return (
                 <table className="w-full text-xs">
