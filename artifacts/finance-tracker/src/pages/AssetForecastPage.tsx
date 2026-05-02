@@ -215,7 +215,15 @@ export default function AssetForecastPage() {
     queryFn: async () => {
       const res = await fetch("/api/expense-forecast");
       if (!res.ok) return [];
-      return res.json() as Promise<{ year: number; actualBalance: number | null }[]>;
+      return res.json() as Promise<{
+        year: number;
+        availableAfterInvestment: number;
+        needTotal: number;
+        wantBudget: number;
+        actualNeed: number | null;
+        actualWant: number | null;
+        actualBalance: number | null;
+      }[]>;
     },
   });
   const forecastLoansQuery = useQuery({ queryKey: ["asset-forecast-loans"], queryFn: fetchForecastLoans });
@@ -505,13 +513,15 @@ export default function AssetForecastPage() {
     return new Map(freeCashRows.map((row) => [row.year, row.freeCash + row.totalInterest]));
   }, [freeCashRows]);
 
-  // actualBalance(year N) → added to Spending Fund start of year N+1
+  // Compute effective balance same way as expense tracker frontend (budget as fallback)
   const spendingFundExtraByYear = useMemo(() => {
     const rows = expenseForecastQuery.data ?? [];
     const result = new Map<number, number>();
     for (const row of rows) {
-      if (row.actualBalance != null && row.actualBalance !== 0) {
-        result.set(row.year + 1, (result.get(row.year + 1) ?? 0) + row.actualBalance);
+      const balance = row.actualBalance ??
+        (row.availableAfterInvestment - (row.actualNeed ?? row.needTotal) - (row.actualWant ?? row.wantBudget));
+      if (balance !== 0) {
+        result.set(row.year + 1, (result.get(row.year + 1) ?? 0) + balance);
       }
     }
     return result;
