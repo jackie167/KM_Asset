@@ -45,9 +45,7 @@ function serialize(row: typeof expenseForecastTable.$inferSelect) {
   const spendingFundChange = availableAfterInvestment - needTotal - wantBudget;
   const actualNeed = row.actualNeed != null ? num(row.actualNeed) : null;
   const actualWant = row.actualWant != null ? num(row.actualWant) : null;
-  const actualBalance = (actualNeed != null || actualWant != null)
-    ? availableAfterInvestment - (actualNeed ?? needTotal) - (actualWant ?? wantBudget)
-    : null;
+  const actualBalance = availableAfterInvestment - (actualNeed ?? needTotal) - (actualWant ?? wantBudget);
 
   return {
     id: row.id,
