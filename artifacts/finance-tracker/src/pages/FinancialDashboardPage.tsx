@@ -154,35 +154,44 @@ async function fetchTransactions() {
 
 // ─── sub-components ──────────────────────────────────────────────────────────
 
-function StatCard({
-  label,
-  value,
-  sub,
-  subTone = "neutral",
-  tone: t = "neutral",
-  loading = false,
-  href,
-}: {
+type SummaryRow = {
   label: string;
   value: string;
   sub?: string;
-  subTone?: Tone;
   tone?: Tone;
+  subTone?: Tone;
   loading?: boolean;
   href?: string;
-}) {
-  const content = (
-    <Card className={`p-4 space-y-1 ${href ? "hover:border-primary/60 hover:shadow-[0_0_0_1px_hsl(var(--primary))] transition cursor-pointer" : ""}`}>
-      <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{label}</p>
-      {loading ? (
-        <div className="h-7 w-28 rounded bg-muted animate-pulse" />
-      ) : (
-        <p className={`text-base md:text-xl font-bold tabular-nums break-all leading-snug ${TONE_CLASS[t]}`}>{value}</p>
-      )}
-      {sub && <p className={`text-xs font-medium tabular-nums ${TONE_CLASS[subTone]}`}>{sub}</p>}
+};
+
+function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
+  return (
+    <Card className="p-4 md:p-5">
+      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{title}</p>
+      <div className="mt-3 divide-y divide-border">
+        {rows.map((row) => {
+          const content = (
+            <div className={`py-3 first:pt-0 last:pb-0 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{row.label}</p>
+                  {row.sub && <p className={`mt-1 text-xs font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
+                </div>
+                {row.loading ? (
+                  <div className="h-6 w-28 rounded bg-muted animate-pulse" />
+                ) : (
+                  <p className={`text-sm md:text-base font-bold tabular-nums text-right break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
+                    {row.value}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+          return row.href ? <Link key={row.label} href={row.href}>{content}</Link> : <div key={row.label}>{content}</div>;
+        })}
+      </div>
     </Card>
   );
-  return href ? <Link href={href}>{content}</Link> : content;
 }
 
 type HealthRowProps = {
@@ -378,60 +387,60 @@ export default function FinancialDashboardPage() {
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng quan</p>
           <div className="grid grid-cols-2 gap-4">
 
-            {/* Trái — Tài sản */}
-            <div className="space-y-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tài sản</p>
-              <StatCard
-                label="Tổng tài sản"
-                value={fmt(netWorth, true)}
-                sub={totalAssetPnlText}
-                subTone={tone(totalAssetPnl)}
-                loading={wealthLoading || baseAssetsQuery.isLoading || investLoading}
-                href="/wealth-allocation"
-              />
-              <StatCard
-                label="Nợ"
-                value={fmt(forecastDebt, true)}
-                sub={netWorth > 0 && forecastDebt
-                  ? `${formatPercent(forecastDebt / netWorth)} tổng tài sản`
-                  : undefined}
-                tone="negative"
-                loading={debtLoading}
-              />
-              <StatCard
-                label="Tài sản ròng"
-                value={fmt(netWorth > 0 ? netWorth - forecastDebt : null, true)}
-                sub="Sau khi trừ nợ"
-                tone="positive"
-                loading={wealthLoading || debtLoading}
-              />
-            </div>
+            <SummaryPanel
+              title="Tài sản"
+              rows={[
+                {
+                  label: "Tổng tài sản",
+                  value: fmt(netWorth, true),
+                  sub: totalAssetPnlText,
+                  subTone: tone(totalAssetPnl),
+                  loading: wealthLoading || baseAssetsQuery.isLoading || investLoading,
+                  href: "/wealth-allocation",
+                },
+                {
+                  label: "Nợ",
+                  value: fmt(forecastDebt, true),
+                  sub: netWorth > 0 && forecastDebt ? `${formatPercent(forecastDebt / netWorth)} tổng tài sản` : undefined,
+                  tone: "negative",
+                  loading: debtLoading,
+                },
+                {
+                  label: "Tài sản ròng",
+                  value: fmt(netWorth > 0 ? netWorth - forecastDebt : null, true),
+                  sub: "Sau khi trừ nợ",
+                  tone: "positive",
+                  loading: wealthLoading || debtLoading,
+                },
+              ]}
+            />
 
-            {/* Phải — Đầu tư */}
-            <div className="space-y-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Đầu tư</p>
-              <StatCard
-                label="Tổng đầu tư"
-                value={fmt(financialTotal, true)}
-                sub={`${formatPercent(financialRatio)} tổng tài sản`}
-                loading={investLoading}
-                href="/assets"
-              />
-            <StatCard
-              label="Lợi nhuận P/L"
-              value={fmt(pnl, true)}
-              sub={formatPercent(pnlPct)}
-              tone={tone(pnl)}
-              loading={investLoading}
+            <SummaryPanel
+              title="Đầu tư"
+              rows={[
+                {
+                  label: "Tổng đầu tư",
+                  value: fmt(financialTotal, true),
+                  sub: `${formatPercent(financialRatio)} tổng tài sản`,
+                  loading: investLoading,
+                  href: "/assets",
+                },
+                {
+                  label: "Lợi nhuận P/L",
+                  value: fmt(pnl, true),
+                  sub: formatPercent(pnlPct),
+                  tone: tone(pnl),
+                  loading: investLoading,
+                },
+                {
+                  label: "XIRR / Năm",
+                  value: formatPercent(xirrAnnual),
+                  sub: xirrAnnual != null ? (xirrAnnual >= 0.1 ? "Trên mục tiêu 10%" : "Dưới mục tiêu 10%") : "Chưa có dữ liệu",
+                  tone: xirrAnnual == null ? "neutral" : xirrAnnual >= 0.1 ? "positive" : xirrAnnual >= 0 ? "warn" : "negative",
+                  loading: xirrQuery.isLoading,
+                },
+              ]}
             />
-            <StatCard
-              label="XIRR / Năm"
-              value={formatPercent(xirrAnnual)}
-              sub={xirrAnnual != null ? (xirrAnnual >= 0.1 ? "Trên mục tiêu 10%" : "Dưới mục tiêu 10%") : "Chưa có dữ liệu"}
-              tone={xirrAnnual == null ? "neutral" : xirrAnnual >= 0.1 ? "positive" : xirrAnnual >= 0 ? "warn" : "negative"}
-              loading={xirrQuery.isLoading}
-            />
-            </div>{/* end Đầu tư */}
 
           </div>{/* end grid cols-2 */}
         </section>
