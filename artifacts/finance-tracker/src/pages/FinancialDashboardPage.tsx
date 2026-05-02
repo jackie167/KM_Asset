@@ -171,7 +171,7 @@ function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
       <div className="mt-3 divide-y divide-border">
         {rows.map((row) => {
           const content = (
-            <div className={`py-2.5 first:pt-0 last:pb-0 space-y-0.5 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
+            <div className={`py-3.5 first:pt-0 last:pb-0 space-y-1 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
               <p className="text-[11px] text-muted-foreground uppercase tracking-widest leading-tight">{row.label}</p>
               {row.loading ? (
                 <div className="h-6 w-24 rounded bg-muted animate-pulse" />
