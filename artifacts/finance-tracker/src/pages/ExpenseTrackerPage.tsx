@@ -45,6 +45,11 @@ type ExpenseForecastRow = {
   needMaintenance: number;
   needTotal: number;
   wantBudget: number;
+  wantShopping: number;
+  wantTravel: number;
+  wantSupport: number;
+  wantPersonal: number;
+  wantOther: number;
   spendingFundChange: number;
   note: string | null;
 };
@@ -95,6 +100,11 @@ async function saveExpenseForecast(rows: ExpenseForecastRow[]): Promise<ExpenseF
         needAllowance: row.needAllowance,
         needMaintenance: row.needMaintenance,
         wantBudget: row.wantBudget,
+        wantShopping: row.wantShopping,
+        wantTravel: row.wantTravel,
+        wantSupport: row.wantSupport,
+        wantPersonal: row.wantPersonal,
+        wantOther: row.wantOther,
         note: row.note,
       })),
     }),
@@ -243,7 +253,9 @@ export default function ExpenseTrackerPage() {
       const investmentAmount = totalIncome * (next.investmentRatio / 100);
       const availableAfterInvestment = totalIncome - investmentAmount;
       const needTotal = next.needLiving + next.needTuition + next.needAllowance + next.needMaintenance;
-      const spendingFundChange = availableAfterInvestment - needTotal - next.wantBudget;
+      const wantCatTotal = next.wantShopping + next.wantTravel + next.wantSupport + next.wantPersonal + next.wantOther;
+      const wantBudget = wantCatTotal > 0 ? wantCatTotal : next.wantBudget;
+      const spendingFundChange = availableAfterInvestment - needTotal - wantBudget;
       return {
         ...current,
         [year]: {
@@ -252,6 +264,7 @@ export default function ExpenseTrackerPage() {
           investmentAmount,
           availableAfterInvestment,
           needTotal,
+          wantBudget,
           spendingFundChange,
         },
       };
@@ -332,7 +345,12 @@ export default function ExpenseTrackerPage() {
                 { label: "· Tuition",       field: "needTuition",     indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needTuition)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needTuition", ev.target.value)} /> : fmt(r.needTuition, hide) },
                 { label: "· Allowance",     field: "needAllowance",   indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needAllowance)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needAllowance", ev.target.value)} /> : fmt(r.needAllowance, hide) },
                 { label: "· Maintenance",   field: "needMaintenance", indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.needMaintenance)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "needMaintenance", ev.target.value)} /> : fmt(r.needMaintenance, hide) },
-                { label: "Want",            field: "wantBudget",      className: "text-primary font-bold", render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantBudget)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantBudget", ev.target.value)} /> : fmt(r.wantBudget, hide) },
+                { label: "Want",            className: "text-primary font-bold", render: (r, e) => <span className="text-primary">{fmt(e.wantBudget, hide)}</span> },
+                { label: "· Shopping",      field: "wantShopping", indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantShopping)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantShopping", ev.target.value)} /> : fmt(r.wantShopping, hide) },
+                { label: "· Travel",        field: "wantTravel",   indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantTravel)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantTravel", ev.target.value)} /> : fmt(r.wantTravel, hide) },
+                { label: "· Support",       field: "wantSupport",  indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantSupport)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantSupport", ev.target.value)} /> : fmt(r.wantSupport, hide) },
+                { label: "· Personal",      field: "wantPersonal", indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantPersonal)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantPersonal", ev.target.value)} /> : fmt(r.wantPersonal, hide) },
+                { label: "· Other",         field: "wantOther",    indent: true, render: (r, e, yr) => forecastEditing ? <Input value={String(e.wantOther)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "wantOther", ev.target.value)} /> : fmt(r.wantOther, hide) },
                 { label: "Spending fund Δ", className: "", render: (r, e) => <span className={e.spendingFundChange >= 0 ? "text-emerald-400 font-semibold" : "text-red-400 font-semibold"}>{fmt(e.spendingFundChange, hide)}</span> },
               ];
               return (
