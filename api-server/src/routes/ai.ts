@@ -13,6 +13,7 @@ import {
   incomeSourcesTable,
   incomeProjectCalcTable,
   incomeForecastTable,
+  priceHistoryTable,
 } from "../../../lib/db/src/index.ts";
 
 const router: IRouter = Router();
@@ -365,12 +366,29 @@ async function toolGetAssets(): Promise<string> {
 }
 
 async function toolGetHoldingsSnapshot(): Promise<string> {
-  const holdings = await db.select().from(holdingsTable);
+  const [holdings, latestPrices] = await Promise.all([
+    db.select().from(holdingsTable),
+    // priceOrValue = per-unit price (NOT currentValue which is total)
+    db.selectDistinctOn([priceHistoryTable.assetCode], {
+      assetCode: priceHistoryTable.assetCode,
+      priceOrValue: priceHistoryTable.priceOrValue,
+    })
+      .from(priceHistoryTable)
+      .orderBy(priceHistoryTable.assetCode, desc(priceHistoryTable.priceAt)),
+  ]);
+
   if (holdings.length === 0) return "Chưa có dữ liệu danh mục đầu tư.";
 
-  // Mirror the actual route logic:
-  // - stock/gold/crypto: manualPrice = price per unit → currentValue = qty × manualPrice
-  // - everything else (fund, cash, real_estate…): manualPrice = total portfolio value → currentValue = manualPrice
+  // per-unit price from price_history (priceOrValue only — currentValue is the total, not per-unit)
+  const unitPriceFromHistory = new Map<string, number>();
+  for (const p of latestPrices) {
+    const price = num(p.priceOrValue);
+    if (price > 0) unitPriceFromHistory.set(p.assetCode.toUpperCase(), price);
+  }
+
+  // Mirror the actual holdings route:
+  // - stock/gold/crypto: currentValue = qty × unitPrice (manualPrice or latest priceOrValue)
+  // - fund/cash/real_estate/…: currentValue = manualPrice (already total portfolio value)
   const NON_MANUAL = new Set(["stock", "gold", "crypto"]);
   const isNonManual = (t: string) => NON_MANUAL.has(t.trim().toLowerCase());
 
@@ -380,11 +398,14 @@ async function toolGetHoldingsSnapshot(): Promise<string> {
 
   for (const h of holdings) {
     const qty      = num(h.quantity);
-    const unitPrice = num(h.manualPrice);
+    const manual   = num(h.manualPrice);
     const cost     = num(h.costOfCapital);
     const interest = num(h.interest);
 
-    const currentValue = isNonManual(h.type) ? qty * unitPrice : unitPrice;
+    const unitPrice = isNonManual(h.type)
+      ? (unitPriceFromHistory.get(h.symbol.toUpperCase()) || manual)
+      : 0;
+    const currentValue = isNonManual(h.type) ? qty * unitPrice : manual;
 
     const unrealized = cost > 0 && currentValue > 0 ? currentValue - cost : null;
     const totalPnL   = unrealized != null ? unrealized + interest : interest > 0 ? interest : null;
@@ -392,16 +413,14 @@ async function toolGetHoldingsSnapshot(): Promise<string> {
     totalValue += currentValue;
     totalCost  += cost;
 
-    const detail = isNonManual(h.type)
-      ? ` (qty=${qty} × ${fmtB(unitPrice)})`
-      : "";
+    const detail = isNonManual(h.type) ? ` (${qty} × ${fmtB(unitPrice)})` : "";
     const pnlStr = totalPnL != null ? ` | P/L ${totalPnL >= 0 ? "+" : ""}${fmtB(totalPnL)}` : "";
     lines.push(`- ${h.symbol} (${h.type})${detail}: ${fmtB(currentValue)}, vốn ${fmtB(cost)}${pnlStr}`);
   }
 
   const totalPnL = totalValue - totalCost;
   return [
-    `Danh mục đầu tư — ${holdings.length} tài sản (giá từ manualPrice hệ thống)`,
+    `Danh mục đầu tư — ${holdings.length} tài sản`,
     `Tổng giá trị: ${fmtB(totalValue)} | Vốn: ${fmtB(totalCost)} | P/L: ${totalPnL >= 0 ? "+" : ""}${fmtB(totalPnL)}`,
     "",
     ...lines,
