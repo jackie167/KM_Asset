@@ -119,6 +119,14 @@ router.put("/income-forecast", async (req, res): Promise<void> => {
 
 // ── Project calculator ────────────────────────────────────────────────────────
 
+router.get("/income-project-calc", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(incomeProjectCalcTable)
+    .orderBy(asc(incomeProjectCalcTable.sourceId), asc(incomeProjectCalcTable.rowId), asc(incomeProjectCalcTable.year));
+  res.json(rows);
+});
+
 router.get("/income-project-calc/:sourceId", async (req, res): Promise<void> => {
   const sourceId = Number(req.params.sourceId);
   if (!Number.isInteger(sourceId)) { res.status(400).json({ error: "Invalid sourceId." }); return; }

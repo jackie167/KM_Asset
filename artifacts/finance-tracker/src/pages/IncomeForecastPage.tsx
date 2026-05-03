@@ -165,13 +165,7 @@ function calcGet(r: CalcResult, id: string): number {
 
 type CalcEntry = { id: number; sourceId: number; rowId: string; year: number; value: string };
 
-function ProjectCalculator({
-  source,
-  onApplyFCF,
-}: {
-  source: IncomeSource;
-  onApplyFCF: (sourceId: number, fcfByYear: Record<number, number>) => void;
-}) {
+function ProjectCalculator({ source }: { source: IncomeSource }) {
   const qc = useQueryClient();
 
   // load from DB
@@ -203,9 +197,6 @@ function ProjectCalculator({
   const [fillRow, setFillRow]       = useState<string | null>(null);
   const [fillBase, setFillBase]     = useState("");
   const [fillGrowth, setFillGrowth] = useState("0");
-
-  // apply dialog
-  const [showApply, setShowApply]   = useState(false);
 
   // track whether user has made unsaved changes
   const [userModified, setUserModified] = useState(false);
@@ -247,6 +238,7 @@ function ProjectCalculator({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["income-project-calc", source.id] });
+      qc.invalidateQueries({ queryKey: ["income-project-calc-all"] });
       setUserModified(false);
     },
   });
@@ -281,11 +273,6 @@ function ProjectCalculator({
     return map;
   }, [localValues]);
 
-  const fcfByYear = useMemo(() => {
-    const m: Record<number, number> = {};
-    for (const year of YEARS) m[year] = calcResults[year]?.fcf ?? 0;
-    return m;
-  }, [calcResults]);
 
   const fillRowDef = CALC_ROWS.find((r) => r.kind === "input" && r.id === fillRow);
 
@@ -377,12 +364,7 @@ function ProjectCalculator({
                           </>
                         )}
                         {isFCF && (
-                          <button
-                            className="shrink-0 ml-auto text-[10px] bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors px-2 py-0.5 rounded font-medium"
-                            onClick={() => { setApplyTarget(source.id); setShowApply(true); }}
-                          >
-                            Áp dụng →
-                          </button>
+                          <span className="shrink-0 ml-auto text-[10px] text-emerald-400/60">→ bảng thu nhập</span>
                         )}
                       </div>
                     </td>
@@ -457,36 +439,6 @@ function ProjectCalculator({
         </DialogContent>
       </Dialog>
 
-      {/* apply dialog */}
-      <Dialog open={showApply} onOpenChange={setShowApply}>
-        <DialogContent className="sm:max-w-xs">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Áp dụng dòng tiền vào nguồn thu</DialogTitle>
-          </DialogHeader>
-          <div className="py-2 space-y-2">
-            <p className="text-xs text-muted-foreground">Dòng tiền cuối năm (FCF) sẽ được điền vào nguồn thu. Bạn có thể xem lại và lưu sau.</p>
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-md border border-primary bg-primary/10 text-xs">
-              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: source.color }} />
-              <span className="font-medium">{source.name}</span>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setShowApply(false)}>Huỷ</Button>
-            <Button
-              size="sm"
-              disabled={saveMut.isPending}
-              onClick={async () => {
-                // save to DB before applying so values are never lost
-                try { await saveMut.mutateAsync(buildEntries(localValues)); } catch { /* best-effort */ }
-                onApplyFCF(source.id, fcfByYear);
-                setShowApply(false);
-              }}
-            >
-              {saveMut.isPending ? "Đang lưu…" : "Lưu & Áp dụng"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
@@ -507,8 +459,16 @@ export default function IncomeForecastPage() {
   const [selectedCalcSrc, setSelectedCalcSrc] = useState<IncomeSource | null>(null);
   const calcSectionRef = useRef<HTMLDivElement>(null);
 
-  const sourcesQ = useQuery({ queryKey: ["income-sources"], queryFn: fetchSources });
-  const entriesQ = useQuery({ queryKey: ["income-forecast"], queryFn: fetchEntries });
+  const sourcesQ  = useQuery({ queryKey: ["income-sources"],         queryFn: fetchSources });
+  const entriesQ  = useQuery({ queryKey: ["income-forecast"],         queryFn: fetchEntries });
+  const calcAllQ  = useQuery({
+    queryKey: ["income-project-calc-all"],
+    queryFn: async () => {
+      const res = await fetch("/api/income-project-calc");
+      if (!res.ok) return [] as CalcEntry[];
+      return res.json() as Promise<CalcEntry[]>;
+    },
+  });
 
   const sources = sourcesQ.data ?? [];
   const entries = entriesQ.data ?? [];
@@ -531,7 +491,34 @@ export default function IncomeForecastPage() {
     return map;
   }, [entries]);
 
-  const displayCells = editMode ? cells : dbCells;
+  // Compute FCF per year for every business source directly from calculator DB data
+  const businessFCF = useMemo<CellMap>(() => {
+    const allEntries = calcAllQ.data ?? [];
+    const bySource: Record<number, CalcEntry[]> = {};
+    for (const e of allEntries) { bySource[e.sourceId] ??= []; bySource[e.sourceId]!.push(e); }
+
+    const result: CellMap = {};
+    for (const src of sources.filter(isBusiness)) {
+      const vals: CalcValues = {};
+      for (const e of bySource[src.id] ?? []) {
+        vals[e.rowId] ??= {};
+        vals[e.rowId]![e.year] = Number(e.value);
+      }
+      result[src.id] = {};
+      for (const year of YEARS) {
+        const inp: Record<string, number> = {};
+        for (const row of CALC_ROWS) if (row.kind === "input") inp[row.id] = vals[row.id]?.[year] ?? 0;
+        result[src.id]![year] = computeCalcYear(inp).fcf;
+      }
+    }
+    return result;
+  }, [calcAllQ.data, sources]);
+
+  // Business sources always show FCF from calculator (overrides dbCells / cells)
+  const displayCells = useMemo<CellMap>(() => {
+    const base = editMode ? cells : dbCells;
+    return { ...base, ...businessFCF };
+  }, [editMode, cells, dbCells, businessFCF]);
 
   const yearTotals = useMemo(() => {
     const t: Record<number, number> = {};
@@ -544,7 +531,9 @@ export default function IncomeForecastPage() {
 
   const enterEdit = () => {
     const copy: CellMap = {};
-    for (const src of sources) copy[src.id] = { ...(dbCells[src.id] ?? {}) };
+    // only copy non-business sources; business sources come from calculator
+    for (const src of sources.filter((s) => !isBusiness(s)))
+      copy[src.id] = { ...(dbCells[src.id] ?? {}) };
     setCells(copy);
     setEditMode(true);
   };
@@ -559,19 +548,6 @@ export default function IncomeForecastPage() {
     if (!isBusiness(src)) return;
     setSelectedCalcSrc(src);
     setTimeout(() => calcSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-  };
-
-  const handleApplyFCF = (sourceId: number, fcfByYear: Record<number, number>) => {
-    const copy: CellMap = {};
-    for (const src of sources) copy[src.id] = { ...(dbCells[src.id] ?? {}) };
-    copy[sourceId] = { ...copy[sourceId] };
-    for (const [y, amount] of Object.entries(fcfByYear)) {
-      if (amount !== 0) copy[sourceId]![Number(y)] = amount;
-    }
-    setCells(copy);
-    setEditMode(true);
-    // scroll back up to the table
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // ── mutations ─────────────────────────────────────────────────────────────────
@@ -622,7 +598,8 @@ export default function IncomeForecastPage() {
 
   const handleSave = () => {
     const payload: { sourceId: number; year: number; amount: number }[] = [];
-    for (const src of sources) {
+    // business sources are read-only in this table; skip them
+    for (const src of sources.filter((s) => !isBusiness(s))) {
       for (const year of YEARS) {
         const amount = cells[src.id]?.[year] ?? 0;
         if (amount !== 0) payload.push({ sourceId: src.id, year, amount });
@@ -633,6 +610,7 @@ export default function IncomeForecastPage() {
 
   const isLoading = sourcesQ.isLoading || entriesQ.isLoading;
   const businessSources = sources.filter(isBusiness);
+  const hasNonBusiness = sources.some((s) => !isBusiness(s));
 
   // ── render ────────────────────────────────────────────────────────────────────
 
@@ -654,7 +632,7 @@ export default function IncomeForecastPage() {
                 <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={cancelEdit}>Huỷ</Button>
               </>
             ) : (
-              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={enterEdit} disabled={sources.length === 0}>
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={enterEdit} disabled={!hasNonBusiness}>
                 Chỉnh sửa
               </Button>
             )}
@@ -711,16 +689,19 @@ export default function IncomeForecastPage() {
                           <span className="shrink-0 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded leading-none">
                             {typeLabel(src.type)}
                           </span>
-                          {clickable && (
-                            <ChevronRight size={11} className={`shrink-0 ml-auto transition-colors ${isSelected ? "text-primary" : "text-muted-foreground/40"}`} />
+                          {clickable && !isSelected && (
+                            <ChevronRight size={11} className="shrink-0 ml-auto text-muted-foreground/40" />
+                          )}
+                          {clickable && isSelected && (
+                            <span className="shrink-0 ml-auto text-[10px] text-primary/60">← bảng tính</span>
                           )}
                         </div>
                       </td>
                       {YEARS.map((year) => {
                         const val = displayCells[src.id]?.[year] ?? 0;
                         return (
-                          <td key={year} className={`px-3 py-2.5 text-right tabular-nums ${year === CURRENT_YEAR ? "bg-primary/5" : ""} ${isSelected && !editMode ? "bg-primary/5" : ""}`}>
-                            {editMode ? (
+                          <td key={year} className={`px-3 py-2.5 text-right tabular-nums ${year === CURRENT_YEAR ? "bg-primary/5" : ""} ${isSelected ? "bg-primary/5" : ""}`}>
+                            {editMode && !clickable ? (
                               <input
                                 type="number" min={0} step={1_000_000}
                                 className="w-full text-right bg-transparent border-b border-border outline-none focus:border-primary tabular-nums text-xs py-0.5 placeholder:text-muted-foreground/30"
@@ -729,7 +710,7 @@ export default function IncomeForecastPage() {
                                 onChange={(e) => setCell(src.id, year, Number(e.target.value) || 0)}
                               />
                             ) : (
-                              <span className={val > 0 ? "text-foreground" : "text-muted-foreground/30"}>{fmtVND(val)}</span>
+                              <span className={`${val > 0 ? "text-foreground" : "text-muted-foreground/30"} ${clickable && val > 0 ? "text-emerald-400" : ""}`}>{fmtVND(val)}</span>
                             )}
                           </td>
                         );
@@ -803,11 +784,7 @@ export default function IncomeForecastPage() {
             </Card>
           ) : (
             // key forces remount when source changes → resets all local state + re-fetches
-            <ProjectCalculator
-              key={selectedCalcSrc.id}
-              source={selectedCalcSrc}
-              onApplyFCF={handleApplyFCF}
-            />
+            <ProjectCalculator key={selectedCalcSrc.id} source={selectedCalcSrc} />
           )}
         </div>
       </main>
