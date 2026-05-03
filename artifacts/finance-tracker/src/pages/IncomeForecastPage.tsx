@@ -16,7 +16,7 @@ import {
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
-const YEAR_START = 2024;
+const YEAR_START = 2026;
 const YEAR_END = 2044;
 const YEARS = Array.from({ length: YEAR_END - YEAR_START + 1 }, (_, i) => YEAR_START + i);
 const CURRENT_YEAR = new Date().getFullYear();
@@ -61,15 +61,7 @@ type CellMap = Record<number, Record<number, number>>;
 
 function formatCell(amount: number): string {
   if (amount <= 0) return "—";
-  if (amount >= 1_000_000_000) {
-    const b = amount / 1_000_000_000;
-    return `${b % 1 === 0 ? b : b.toFixed(1)}B`;
-  }
-  if (amount >= 1_000_000) {
-    const m = amount / 1_000_000;
-    return `${m % 1 === 0 ? m : m.toFixed(0)}M`;
-  }
-  return amount.toLocaleString("vi-VN");
+  return Math.round(amount).toLocaleString("vi-VN");
 }
 
 function typeLabel(type: string) {
