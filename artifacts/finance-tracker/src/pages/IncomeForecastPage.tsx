@@ -98,18 +98,20 @@ type CalcValues = Record<string, Record<number, number>>;
 type CalcRow =
   | { kind: "section"; label: string }
   | { kind: "input";   id: string; label: string; unit: string; indent?: boolean }
-  | { kind: "calc";    id: string; label: string; bold?: boolean; highlight?: boolean; isPercent?: boolean; isFCF?: boolean; isSub?: boolean; indent?: boolean };
+  | { kind: "calc";    id: string; label: string; bold?: boolean; highlight?: boolean; isPercent?: boolean; isPlain?: boolean; plainUnit?: string; isFCF?: boolean; isSub?: boolean; indent?: boolean };
 
 const CALC_ROWS: CalcRow[] = [
   { kind: "section", label: "DOANH THU" },
-  { kind: "input",   id: "volume",        label: "Sản lượng",                         unit: "sp/năm" },
-  { kind: "input",   id: "price",         label: "Đơn giá bán",                       unit: "đ/sp",   indent: true },
+  { kind: "input",   id: "area",          label: "Diện tích canh tác",                unit: "ha" },
+  { kind: "input",   id: "yield_per_ha",  label: "Năng suất",                         unit: "tấn/ha", indent: true },
+  { kind: "calc",    id: "volume",        label: "Sản lượng",                         isSub: true, indent: true, isPlain: true, plainUnit: "tấn" },
+  { kind: "input",   id: "price",         label: "Đơn giá bán",                       unit: "đ/tấn",  indent: true },
   { kind: "calc",    id: "revenue",       label: "Doanh thu thuần",                   bold: true },
 
-  { kind: "section", label: "GIÁ VỐN HÀNG BÁN" },
-  { kind: "input",   id: "cogs_material", label: "Chi phí nguyên vật liệu / sp",      unit: "đ/sp",   indent: true },
-  { kind: "input",   id: "cogs_labor",    label: "Chi phí nhân công trực tiếp / sp",  unit: "đ/sp",   indent: true },
-  { kind: "input",   id: "cogs_overhead", label: "Chi phí sản xuất chung / sp",       unit: "đ/sp",   indent: true },
+  { kind: "section", label: "GIÁ VỐN HÀNG BÁN (tính theo ha)" },
+  { kind: "input",   id: "cogs_material", label: "Phân bón & vật tư",                 unit: "đ/ha",   indent: true },
+  { kind: "input",   id: "cogs_labor",    label: "Nhân công trực tiếp",               unit: "đ/ha",   indent: true },
+  { kind: "input",   id: "cogs_overhead", label: "Chi phí sản xuất chung",            unit: "đ/ha",   indent: true },
   { kind: "calc",    id: "cogs",          label: "Giá vốn hàng bán" },
   { kind: "calc",    id: "gross_profit",  label: "Lợi nhuận gộp",                     bold: true, highlight: true },
   { kind: "calc",    id: "gross_margin",  label: "Biên lợi nhuận gộp",                isPercent: true, indent: true, isSub: true },
@@ -133,15 +135,17 @@ const CALC_ROWS: CalcRow[] = [
 ];
 
 type CalcResult = {
+  volume: number;
   revenue: number; cogs: number; gross_profit: number; gross_margin: number;
   ebit: number; tax: number; net_profit: number; dep_addback: number; fcf: number;
 };
 
 function computeCalcYear(inp: Record<string, number>): CalcResult {
   const g = (id: string) => inp[id] ?? 0;
-  const volume = g("volume"), price = g("price");
-  const revenue = volume * price;
-  const cogs = volume * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead"));
+  const area = g("area");                         // ha
+  const volume = area * g("yield_per_ha");        // tấn/năm
+  const revenue = volume * g("price");            // đ/năm
+  const cogs = area * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead")); // đ/ha × ha
   const gross_profit = revenue - cogs;
   const gross_margin = revenue > 0 ? (gross_profit / revenue) * 100 : 0;
   const depreciation = g("depreciation");
@@ -150,7 +154,7 @@ function computeCalcYear(inp: Record<string, number>): CalcResult {
   const net_profit = ebit - tax;
   const dep_addback = depreciation;
   const fcf = net_profit + dep_addback - g("capex") - g("delta_wc");
-  return { revenue, cogs, gross_profit, gross_margin, ebit, tax, net_profit, dep_addback, fcf };
+  return { volume, revenue, cogs, gross_profit, gross_margin, ebit, tax, net_profit, dep_addback, fcf };
 }
 
 function calcGet(r: CalcResult, id: string): number {
@@ -318,14 +322,16 @@ function ProjectCalculator({
                   );
                 }
 
-                const isInput   = row.kind === "input";
-                const unit      = isInput ? (row as { unit: string }).unit : null;
-                const bold      = "bold"      in row && !!row.bold;
-                const highlight = "highlight" in row && !!row.highlight;
-                const isPercent = "isPercent" in row && !!row.isPercent;
-                const isFCF     = "isFCF"     in row && !!row.isFCF;
-                const isSub     = "isSub"     in row && !!row.isSub;
-                const indent    = "indent"    in row && !!row.indent;
+                const isInput    = row.kind === "input";
+                const unit       = isInput ? (row as { unit: string }).unit : null;
+                const bold       = "bold"      in row && !!row.bold;
+                const highlight  = "highlight" in row && !!row.highlight;
+                const isPercent  = "isPercent" in row && !!row.isPercent;
+                const isPlain    = "isPlain"   in row && !!row.isPlain;
+                const plainUnit  = "plainUnit" in row ? (row as { plainUnit?: string }).plainUnit : undefined;
+                const isFCF      = "isFCF"     in row && !!row.isFCF;
+                const isSub      = "isSub"     in row && !!row.isSub;
+                const indent     = "indent"    in row && !!row.indent;
 
                 return (
                   <tr key={row.id} className={`border-b border-border/40 transition-colors ${isFCF ? "bg-emerald-500/5" : highlight ? "bg-muted/20" : "hover:bg-muted/10"}`}>
@@ -374,6 +380,10 @@ function ProjectCalculator({
                               placeholder="—"
                               onChange={(e) => setVal(row.id, year, Number(e.target.value) || 0)}
                             />
+                          ) : isPlain ? (
+                            <span className={`${isSub ? "text-muted-foreground" : ""} ${calcVal === 0 ? "text-muted-foreground/30" : ""}`}>
+                              {calcVal === 0 ? "—" : `${calcVal.toLocaleString("vi-VN")}${plainUnit ? ` ${plainUnit}` : ""}`}
+                            </span>
                           ) : isPercent ? (
                             <span className={`${isSub ? "text-muted-foreground" : ""} ${calcVal < 0 ? "text-red-400" : calcVal > 0 ? "text-emerald-400" : "text-muted-foreground/30"}`}>
                               {calcVal === 0 ? "—" : fmtPct(calcVal)}
