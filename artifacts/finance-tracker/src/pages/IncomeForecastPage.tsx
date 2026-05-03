@@ -93,14 +93,52 @@ async function fetchEntries(): Promise<IncomeForecastEntry[]> {
 // PROJECT CALCULATOR
 // ═══════════════════════════════════════════════════════════════════════════════
 
+type CalcType = "per_unit" | "per_ha";
 type CalcValues = Record<string, Record<number, number>>;
+
+// rowId used to persist the calc type as a special meta entry (year = -1)
+const CALC_TYPE_META = "_calc_type";
 
 type CalcRow =
   | { kind: "section"; label: string }
   | { kind: "input";   id: string; label: string; unit: string; indent?: boolean }
   | { kind: "calc";    id: string; label: string; bold?: boolean; highlight?: boolean; isPercent?: boolean; isPlain?: boolean; plainUnit?: string; isFCF?: boolean; isSub?: boolean; indent?: boolean };
 
-const CALC_ROWS: CalcRow[] = [
+// ── per-unit layout (default) ────────────────────────────────────────────────
+const CALC_ROWS_PER_UNIT: CalcRow[] = [
+  { kind: "section", label: "DOANH THU" },
+  { kind: "input",   id: "volume",        label: "Sản lượng",                         unit: "sp/năm" },
+  { kind: "input",   id: "price",         label: "Đơn giá bán",                       unit: "đ/sp",   indent: true },
+  { kind: "calc",    id: "revenue",       label: "Doanh thu thuần",                   bold: true },
+
+  { kind: "section", label: "GIÁ VỐN HÀNG BÁN" },
+  { kind: "input",   id: "cogs_material", label: "Chi phí nguyên vật liệu / sp",      unit: "đ/sp",   indent: true },
+  { kind: "input",   id: "cogs_labor",    label: "Chi phí nhân công trực tiếp / sp",  unit: "đ/sp",   indent: true },
+  { kind: "input",   id: "cogs_overhead", label: "Chi phí sản xuất chung / sp",       unit: "đ/sp",   indent: true },
+  { kind: "calc",    id: "cogs",          label: "Giá vốn hàng bán" },
+  { kind: "calc",    id: "gross_profit",  label: "Lợi nhuận gộp",                     bold: true, highlight: true },
+  { kind: "calc",    id: "gross_margin",  label: "Biên lợi nhuận gộp",                isPercent: true, indent: true, isSub: true },
+
+  { kind: "section", label: "CHI PHÍ HOẠT ĐỘNG" },
+  { kind: "input",   id: "depreciation",  label: "Khấu hao tài sản cố định",          unit: "đ/năm",  indent: true },
+  { kind: "input",   id: "interest",      label: "Chi phí lãi vay",                   unit: "đ/năm",  indent: true },
+  { kind: "input",   id: "sga",           label: "Chi phí bán hàng & quản lý (SG&A)", unit: "đ/năm",  indent: true },
+  { kind: "calc",    id: "ebit",          label: "EBIT — Lợi nhuận trước thuế & lãi", bold: true, highlight: true },
+
+  { kind: "section", label: "THUẾ" },
+  { kind: "input",   id: "tax_rate",      label: "Thuế suất TNDN",                    unit: "%",      indent: true },
+  { kind: "calc",    id: "tax",           label: "Thuế thu nhập doanh nghiệp",         indent: true, isSub: true },
+  { kind: "calc",    id: "net_profit",    label: "Lợi nhuận sau thuế",                bold: true, highlight: true },
+
+  { kind: "section", label: "DÒNG TIỀN TỰ DO" },
+  { kind: "calc",    id: "dep_addback",   label: "Cộng lại: khấu hao (không tiền mặt)", indent: true, isSub: true },
+  { kind: "input",   id: "capex",         label: "Trừ: đầu tư CAPEX",                 unit: "đ/năm",  indent: true },
+  { kind: "input",   id: "delta_wc",      label: "Trừ: tăng vốn lưu động",            unit: "đ/năm",  indent: true },
+  { kind: "calc",    id: "fcf",           label: "DÒNG TIỀN CUỐI NĂM",               bold: true, highlight: true, isFCF: true },
+];
+
+// ── per-hectare layout (nông nghiệp) ─────────────────────────────────────────
+const CALC_ROWS_PER_HA: CalcRow[] = [
   { kind: "section", label: "DOANH THU" },
   { kind: "input",   id: "area",          label: "Diện tích canh tác",                unit: "ha" },
   { kind: "input",   id: "yield_per_ha",  label: "Năng suất",                         unit: "tấn/ha", indent: true },
@@ -134,26 +172,36 @@ const CALC_ROWS: CalcRow[] = [
   { kind: "calc",    id: "fcf",           label: "DÒNG TIỀN CUỐI NĂM",               bold: true, highlight: true, isFCF: true },
 ];
 
+function getCalcRows(type: CalcType): CalcRow[] {
+  return type === "per_ha" ? CALC_ROWS_PER_HA : CALC_ROWS_PER_UNIT;
+}
+
 type CalcResult = {
   volume: number;
   revenue: number; cogs: number; gross_profit: number; gross_margin: number;
   ebit: number; tax: number; net_profit: number; dep_addback: number; fcf: number;
 };
 
-function computeCalcYear(inp: Record<string, number>): CalcResult {
+function computeCalcYear(inp: Record<string, number>, calcType: CalcType = "per_unit"): CalcResult {
   const g = (id: string) => inp[id] ?? 0;
-  const area = g("area");                         // ha
-  const volume = area * g("yield_per_ha");        // tấn/năm
-  const revenue = volume * g("price");            // đ/năm
-  const cogs = area * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead")); // đ/ha × ha
+  let volume: number, cogs: number;
+  if (calcType === "per_ha") {
+    const area = g("area");
+    volume = area * g("yield_per_ha");
+    cogs   = area * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead"));
+  } else {
+    volume = g("volume");
+    cogs   = volume * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead"));
+  }
+  const revenue      = volume * g("price");
   const gross_profit = revenue - cogs;
   const gross_margin = revenue > 0 ? (gross_profit / revenue) * 100 : 0;
   const depreciation = g("depreciation");
-  const ebit = gross_profit - depreciation - g("interest") - g("sga");
-  const tax = Math.max(0, ebit) * (g("tax_rate") / 100);
-  const net_profit = ebit - tax;
-  const dep_addback = depreciation;
-  const fcf = net_profit + dep_addback - g("capex") - g("delta_wc");
+  const ebit         = gross_profit - depreciation - g("interest") - g("sga");
+  const tax          = Math.max(0, ebit) * (g("tax_rate") / 100);
+  const net_profit   = ebit - tax;
+  const dep_addback  = depreciation;
+  const fcf          = net_profit + dep_addback - g("capex") - g("delta_wc");
   return { volume, revenue, cogs, gross_profit, gross_margin, ebit, tax, net_profit, dep_addback, fcf };
 }
 
@@ -170,6 +218,7 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
 
   const [calcEditMode, setCalcEditMode] = useState(false);
   const [editValues, setEditValues]     = useState<CalcValues>({});
+  const [editCalcType, setEditCalcType] = useState<CalcType>("per_unit");
 
   // fill dialog
   const [fillRow, setFillRow]       = useState<string | null>(null);
@@ -186,23 +235,26 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     },
   });
 
-  // dbValues: what's saved in DB (source of truth for view mode)
-  const dbValues = useMemo<CalcValues>(() => {
+  // dbValues + saved calc type
+  const { dbValues, dbCalcType } = useMemo(() => {
     const map: CalcValues = {};
+    let type: CalcType = "per_unit";
     for (const e of calcQ.data ?? []) {
+      if (e.rowId === CALC_TYPE_META) { type = Number(e.value) === 1 ? "per_ha" : "per_unit"; continue; }
       map[e.rowId] ??= {};
       map[e.rowId]![e.year] = Number(e.value);
     }
-    return map;
+    return { dbValues: map, dbCalcType: type };
   }, [calcQ.data]);
 
-  // displayValues: dbValues in view mode, editValues in edit mode
-  const displayValues = calcEditMode ? editValues : dbValues;
+  const displayValues  = calcEditMode ? editValues  : dbValues;
+  const activeCalcType = calcEditMode ? editCalcType : dbCalcType;
 
   const enterCalcEdit = () => {
     const copy: CalcValues = {};
     for (const [k, v] of Object.entries(dbValues)) copy[k] = { ...v };
     setEditValues(copy);
+    setEditCalcType(dbCalcType);
     setCalcEditMode(true);
   };
 
@@ -251,6 +303,8 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
 
   const handleSave = () => {
     const entries: { rowId: string; year: number; value: number }[] = [];
+    // persist calc type as a meta row (year = -1)
+    entries.push({ rowId: CALC_TYPE_META, year: -1, value: editCalcType === "per_ha" ? 1 : 0 });
     for (const [rowId, yearMap] of Object.entries(editValues)) {
       for (const [y, value] of Object.entries(yearMap)) {
         if (value !== 0) entries.push({ rowId, year: Number(y), value });
@@ -259,18 +313,18 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     saveMut.mutate(entries);
   };
 
-  // compute results from displayValues
+  // compute results from displayValues using the active layout type
   const calcResults = useMemo(() => {
     const map: Record<number, CalcResult> = {};
     for (const year of YEARS) {
       const inp: Record<string, number> = {};
-      for (const row of CALC_ROWS) if (row.kind === "input") inp[row.id] = displayValues[row.id]?.[year] ?? 0;
-      map[year] = computeCalcYear(inp);
+      for (const row of getCalcRows(activeCalcType)) if (row.kind === "input") inp[row.id] = displayValues[row.id]?.[year] ?? 0;
+      map[year] = computeCalcYear(inp, activeCalcType);
     }
     return map;
-  }, [displayValues]);
+  }, [displayValues, activeCalcType]);
 
-  const fillRowDef = CALC_ROWS.find((r) => r.kind === "input" && r.id === fillRow);
+  const fillRowDef = getCalcRows(activeCalcType).find((r) => r.kind === "input" && r.id === fillRow);
 
   return (
     <>
@@ -283,6 +337,17 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
         </div>
         {calcEditMode ? (
           <div className="flex items-center gap-2">
+            {/* layout type toggle — only available in edit mode */}
+            <div className="flex items-center rounded-md border border-border overflow-hidden text-[10px]">
+              <button
+                className={`px-2 py-1 transition-colors ${editCalcType === "per_unit" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                onClick={() => setEditCalcType("per_unit")}
+              >Sản phẩm</button>
+              <button
+                className={`px-2 py-1 border-l border-border transition-colors ${editCalcType === "per_ha" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                onClick={() => setEditCalcType("per_ha")}
+              >Nông nghiệp</button>
+            </div>
             <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={saveMut.isPending}>
               {saveMut.isPending ? "Đang lưu…" : "Lưu"}
             </Button>
@@ -314,7 +379,7 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
               </tr>
             </thead>
             <tbody>
-              {CALC_ROWS.map((row, ri) => {
+              {getCalcRows(activeCalcType).map((row, ri) => {
                 if (row.kind === "section") {
                   return (
                     <tr key={`s-${ri}`} className="bg-muted/40">
@@ -501,15 +566,17 @@ export default function IncomeForecastPage() {
     const result: CellMap = {};
     for (const src of sources.filter(isBusiness)) {
       const vals: CalcValues = {};
+      let srcCalcType: CalcType = "per_unit";
       for (const e of bySource[src.id] ?? []) {
+        if (e.rowId === CALC_TYPE_META) { srcCalcType = Number(e.value) === 1 ? "per_ha" : "per_unit"; continue; }
         vals[e.rowId] ??= {};
         vals[e.rowId]![e.year] = Number(e.value);
       }
       result[src.id] = {};
       for (const year of YEARS) {
         const inp: Record<string, number> = {};
-        for (const row of CALC_ROWS) if (row.kind === "input") inp[row.id] = vals[row.id]?.[year] ?? 0;
-        result[src.id]![year] = computeCalcYear(inp).fcf;
+        for (const row of getCalcRows(srcCalcType)) if (row.kind === "input") inp[row.id] = vals[row.id]?.[year] ?? 0;
+        result[src.id]![year] = computeCalcYear(inp, srcCalcType).fcf;
       }
     }
     return result;

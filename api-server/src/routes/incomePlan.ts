@@ -141,7 +141,7 @@ router.get("/income-project-calc/:sourceId", async (req, res): Promise<void> => 
 
 const CalcEntryInput = z.object({
   rowId: z.string().trim().min(1).max(50),
-  year: z.number().int().min(2020).max(2100),
+  year: z.number().int().min(-1).max(2100), // -1 for meta rows like _calc_type
   value: z.number().finite(),
 });
 
