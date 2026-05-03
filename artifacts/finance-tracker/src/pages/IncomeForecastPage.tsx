@@ -259,13 +259,21 @@ function generateCSV(_sourceName: string, calcType: CalcType, values: CalcValues
 
 function parseCSV(text: string): CalcValues {
   const result: CalcValues = {};
-  // strip BOM if present (Excel UTF-8 CSV)
+  // strip BOM (Excel UTF-8 CSV prepends U+FEFF)
   const cleaned = text.replace(/^﻿/, "");
   const lines = cleaned.trim().split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return result;
 
-  const firstCols = parseCsvRow(lines[0]!);
-  const firstKey  = firstCols[0]?.toLowerCase() ?? "";
+  // auto-detect delimiter: semicolon (Vietnamese/European Excel) vs comma
+  const firstLine = lines[0]!;
+  const usesSemicolon = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0);
+  const splitRow = usesSemicolon
+    ? (line: string) => line.split(";").map((c) => c.trim().replace(/^"|"$/g, ""))
+    : parseCsvRow;
+
+  const firstCols = splitRow(firstLine);
+  // strip any residual BOM from first cell
+  const firstKey  = (firstCols[0] ?? "").replace(/^﻿/, "").toLowerCase();
 
   if (firstKey === "chỉ tiêu" || firstKey === "chi tieu") {
     // ── Transposed (new): rows = metrics, cols = years ──
@@ -275,7 +283,7 @@ function parseCSV(text: string): CalcValues {
       if (YEARS.includes(y)) yearMap.push({ col: i, year: y });
     }
     for (const raw of lines.slice(1)) {
-      const cols  = parseCsvRow(raw);
+      const cols  = splitRow(raw);
       const rowId = LABEL_TO_ID.get(cols[0]?.toLowerCase() ?? "");
       if (!rowId) continue;
       result[rowId] ??= {};
@@ -289,7 +297,7 @@ function parseCSV(text: string): CalcValues {
     const headers = firstCols.map((h) => h.toLowerCase());
     for (const raw of lines.slice(1)) {
       if (raw.trimStart().startsWith("#")) continue;
-      const cols = parseCsvRow(raw);
+      const cols = splitRow(raw);
       const year = Number(cols[0]);
       if (!YEARS.includes(year)) continue;
       for (let i = 1; i < headers.length; i++) {
@@ -463,15 +471,26 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const parsed = parseCSV(ev.target?.result as string);
+      const cellCount = Object.values(parsed).reduce((s, ym) => s + Object.keys(ym).length, 0);
+      if (cellCount === 0) {
+        alert("Không đọc được dữ liệu từ file CSV.\nKiểm tra lại định dạng: hàng đầu phải là \"Chỉ tiêu,2026,2027,...\" (dấu phẩy hoặc chấm phẩy).");
+        return;
+      }
       // Merge parsed values on top of current dbValues, then enter edit mode
       const base: CalcValues = {};
       for (const [k, v] of Object.entries(dbValues)) base[k] = { ...v };
       for (const [rowId, yearMap] of Object.entries(parsed)) {
         base[rowId] = { ...(base[rowId] ?? {}), ...yearMap };
       }
+      const nonZeroCells = Object.values(parsed).reduce(
+        (s, ym) => s + Object.values(ym).filter((v) => v !== 0).length, 0
+      );
       setEditValues(base);
       setEditCalcType(selectedType ?? "direct");
       setCalcEditMode(true);
+      if (nonZeroCells === 0) {
+        alert(`Đã đọc file nhưng tất cả giá trị đều bằng 0.\nHãy kiểm tra lại nội dung CSV (${cellCount} ô được tìm thấy).`);
+      }
     };
     reader.readAsText(file);
     e.target.value = ""; // reset so same file can be re-imported
