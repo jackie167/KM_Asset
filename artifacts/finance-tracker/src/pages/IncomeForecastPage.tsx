@@ -208,43 +208,73 @@ function getInputRows(t: CalcType): InputRowDef[] {
   return getCalcRows(t).filter((r): r is InputRowDef => r.kind === "input");
 }
 
-function generateCSV(sourceName: string, calcType: CalcType, values: CalcValues): string {
-  const rows = getInputRows(calcType);
-  const commentRow = ["# Năm", ...rows.map((r) => `${r.label} (${r.unit})`)].join(",");
-  const headerRow  = ["year",  ...rows.map((r) => r.id)].join(",");
-  const dataRows   = YEARS.map((year) =>
-    [year, ...rows.map((r) => values[r.id]?.[year] ?? 0)].join(",")
+// Lookup: Vietnamese label (with/without unit) OR row ID → rowId
+const LABEL_TO_ID: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const row of [...CALC_ROWS_DIRECT, ...CALC_ROWS_PER_HA]) {
+    if (row.kind !== "input") continue;
+    m.set(`${row.label} (${row.unit})`.toLowerCase(), row.id);
+    m.set(row.label.toLowerCase(), row.id);
+    m.set(row.id.toLowerCase(), row.id);
+  }
+  return m;
+})();
+
+// Format: first row = "Chỉ tiêu", years as columns (matches table layout)
+function generateCSV(_sourceName: string, calcType: CalcType, values: CalcValues): string {
+  const rows   = getInputRows(calcType);
+  const header = ["Chỉ tiêu", ...YEARS].join(",");
+  const data   = rows.map((r) =>
+    [`${r.label} (${r.unit})`, ...YEARS.map((y) => values[r.id]?.[y] ?? 0)].join(",")
   );
-  return [commentRow, headerRow, ...dataRows].join("\n");
+  return [header, ...data].join("\n");
 }
 
 function parseCSV(text: string): CalcValues {
   const result: CalcValues = {};
-  const lines = text.trim().split(/\r?\n/);
-  let headers: string[] | null = null;
+  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return result;
 
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const cols = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
-    if (!headers) { headers = cols.map((h) => h.toLowerCase()); continue; }
+  const firstCols = lines[0]!.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+  const firstKey  = firstCols[0]?.toLowerCase() ?? "";
 
-    const yearIdx = headers.indexOf("year");
-    if (yearIdx === -1) continue;
-    const year = Number(cols[yearIdx]);
-    if (!YEARS.includes(year)) continue;
-
-    for (let i = 0; i < headers.length; i++) {
-      if (i === yearIdx) continue;
-      const rowId = headers[i];
+  if (firstKey === "chỉ tiêu" || firstKey === "chi tieu") {
+    // ── Transposed (new): rows = metrics, cols = years ──
+    const yearMap: { col: number; year: number }[] = [];
+    for (let i = 1; i < firstCols.length; i++) {
+      const y = Number(firstCols[i]);
+      if (YEARS.includes(y)) yearMap.push({ col: i, year: y });
+    }
+    for (const raw of lines.slice(1)) {
+      const cols  = raw.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+      const rowId = LABEL_TO_ID.get(cols[0]?.toLowerCase() ?? "");
       if (!rowId) continue;
-      const raw = cols[i]?.replace(/[^\d.-]/g, "") ?? "";
-      const value = parseFloat(raw);
-      if (!Number.isFinite(value)) continue;
       result[rowId] ??= {};
-      result[rowId]![year] = value;
+      for (const { col, year } of yearMap) {
+        const v = parseFloat(cols[col]?.replace(/[^\d.-]/g, "") ?? "");
+        if (Number.isFinite(v)) result[rowId]![year] = v;
+      }
+    }
+  } else if (firstKey === "year") {
+    // ── Row-per-year (old format): backward-compat ──
+    const headers = firstCols.map((h) => h.toLowerCase());
+    for (const raw of lines.slice(1)) {
+      if (raw.trimStart().startsWith("#")) continue;
+      const cols = raw.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+      const year = Number(cols[0]);
+      if (!YEARS.includes(year)) continue;
+      for (let i = 1; i < headers.length; i++) {
+        const rowId = LABEL_TO_ID.get(headers[i] ?? "");
+        if (!rowId) continue;
+        const v = parseFloat(cols[i]?.replace(/[^\d.-]/g, "") ?? "");
+        if (Number.isFinite(v)) {
+          result[rowId] ??= {};
+          result[rowId]![year] = v;
+        }
+      }
     }
   }
+
   return result;
 }
 
