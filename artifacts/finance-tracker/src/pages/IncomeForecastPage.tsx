@@ -168,7 +168,15 @@ type CalcEntry = { id: number; sourceId: number; rowId: string; year: number; va
 function ProjectCalculator({ source }: { source: IncomeSource }) {
   const qc = useQueryClient();
 
-  // load from DB
+  const [calcEditMode, setCalcEditMode] = useState(false);
+  const [editValues, setEditValues]     = useState<CalcValues>({});
+
+  // fill dialog
+  const [fillRow, setFillRow]       = useState<string | null>(null);
+  const [fillBase, setFillBase]     = useState("");
+  const [fillGrowth, setFillGrowth] = useState("0");
+
+  // load saved data from DB
   const calcQ = useQuery({
     queryKey: ["income-project-calc", source.id],
     queryFn: async () => {
@@ -178,36 +186,34 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     },
   });
 
-  // local editing state — reset when DB data arrives (component remounts on source change via key)
-  const [localValues, setLocalValues] = useState<CalcValues>({});
-  const initialized = useRef(false);
-  useEffect(() => {
-    if (calcQ.data && !initialized.current) {
-      initialized.current = true;
-      const map: CalcValues = {};
-      for (const e of calcQ.data) {
-        map[e.rowId] ??= {};
-        map[e.rowId]![e.year] = Number(e.value);
-      }
-      setLocalValues(map);
+  // dbValues: what's saved in DB (source of truth for view mode)
+  const dbValues = useMemo<CalcValues>(() => {
+    const map: CalcValues = {};
+    for (const e of calcQ.data ?? []) {
+      map[e.rowId] ??= {};
+      map[e.rowId]![e.year] = Number(e.value);
     }
+    return map;
   }, [calcQ.data]);
 
-  // fill dialog
-  const [fillRow, setFillRow]       = useState<string | null>(null);
-  const [fillBase, setFillBase]     = useState("");
-  const [fillGrowth, setFillGrowth] = useState("0");
+  // displayValues: dbValues in view mode, editValues in edit mode
+  const displayValues = calcEditMode ? editValues : dbValues;
 
-  // track whether user has made unsaved changes
-  const [userModified, setUserModified] = useState(false);
+  const enterCalcEdit = () => {
+    const copy: CalcValues = {};
+    for (const [k, v] of Object.entries(dbValues)) copy[k] = { ...v };
+    setEditValues(copy);
+    setCalcEditMode(true);
+  };
+
+  const cancelCalcEdit = () => { setCalcEditMode(false); setEditValues({}); };
 
   const setVal = (rowId: string, year: number, v: number) => {
-    setLocalValues((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [year]: v } }));
-    setUserModified(true);
+    setEditValues((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [year]: v } }));
   };
 
   const openFill = (rowId: string) => {
-    setFillBase(String(localValues[rowId]?.[YEAR_START] ?? ""));
+    setFillBase(String(editValues[rowId]?.[YEAR_START] ?? ""));
     setFillGrowth("0");
     setFillRow(rowId);
   };
@@ -216,12 +222,11 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     if (!fillRow) return;
     const base = parseFloat(fillBase.replace(/\./g, "").replace(",", ".")) || 0;
     const rate = parseFloat(fillGrowth.replace(",", ".")) / 100;
-    setLocalValues((prev) => {
+    setEditValues((prev) => {
       const next = { ...prev, [fillRow]: {} };
       for (const year of YEARS) next[fillRow]![year] = base * Math.pow(1 + rate, year - YEAR_START);
       return next;
     });
-    setUserModified(true);
     setFillRow(null);
   };
 
@@ -239,40 +244,31 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["income-project-calc", source.id] });
       qc.invalidateQueries({ queryKey: ["income-project-calc-all"] });
-      setUserModified(false);
+      setCalcEditMode(false);
+      setEditValues({});
     },
   });
 
-  const buildEntries = (vals: CalcValues) => {
+  const handleSave = () => {
     const entries: { rowId: string; year: number; value: number }[] = [];
-    for (const [rowId, yearMap] of Object.entries(vals)) {
+    for (const [rowId, yearMap] of Object.entries(editValues)) {
       for (const [y, value] of Object.entries(yearMap)) {
         if (value !== 0) entries.push({ rowId, year: Number(y), value });
       }
     }
-    return entries;
+    saveMut.mutate(entries);
   };
 
-  const handleSave = () => saveMut.mutate(buildEntries(localValues));
-
-  // auto-save 2s after user stops typing / filling
-  useEffect(() => {
-    if (!userModified) return;
-    const t = setTimeout(() => saveMut.mutate(buildEntries(localValues)), 2000);
-    return () => clearTimeout(t);
-  }, [localValues, userModified]); // eslint-disable-line
-
-  // compute results
+  // compute results from displayValues
   const calcResults = useMemo(() => {
     const map: Record<number, CalcResult> = {};
     for (const year of YEARS) {
       const inp: Record<string, number> = {};
-      for (const row of CALC_ROWS) if (row.kind === "input") inp[row.id] = localValues[row.id]?.[year] ?? 0;
+      for (const row of CALC_ROWS) if (row.kind === "input") inp[row.id] = displayValues[row.id]?.[year] ?? 0;
       map[year] = computeCalcYear(inp);
     }
     return map;
-  }, [localValues]);
-
+  }, [displayValues]);
 
   const fillRowDef = CALC_ROWS.find((r) => r.kind === "input" && r.id === fillRow);
 
@@ -285,20 +281,18 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
           <span className="text-sm font-semibold">{source.name}</span>
           <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Kinh doanh</span>
         </div>
-        <div className="flex items-center gap-2">
-          {saveMut.isPending && (
-            <span className="text-[11px] text-muted-foreground animate-pulse">Đang lưu…</span>
-          )}
-          {!saveMut.isPending && saveMut.isSuccess && !userModified && (
-            <span className="text-[11px] text-emerald-400">✓ Đã lưu</span>
-          )}
-          {!saveMut.isPending && userModified && (
-            <span className="text-[11px] text-amber-400">● Chưa lưu</span>
-          )}
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleSave} disabled={saveMut.isPending}>
-            Lưu ngay
+        {calcEditMode ? (
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={saveMut.isPending}>
+              {saveMut.isPending ? "Đang lưu…" : "Lưu"}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelCalcEdit}>Huỷ</Button>
+          </div>
+        ) : (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={enterCalcEdit} disabled={calcQ.isLoading}>
+            Chỉnh sửa
           </Button>
-        </div>
+        )}
       </div>
 
       {/* table */}
@@ -351,7 +345,7 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
                         <span className={`${bold ? "font-semibold" : ""} ${isSub ? "text-muted-foreground" : ""} ${isFCF ? "text-emerald-400 font-bold" : ""}`}>
                           {row.label}
                         </span>
-                        {isInput && (
+                        {isInput && calcEditMode && (
                           <>
                             <span className="shrink-0 ml-auto text-[10px] text-muted-foreground/40">{unit}</span>
                             <button
@@ -363,6 +357,9 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
                             </button>
                           </>
                         )}
+                        {isInput && !calcEditMode && (
+                          <span className="shrink-0 ml-auto text-[10px] text-muted-foreground/40">{unit}</span>
+                        )}
                         {isFCF && (
                           <span className="shrink-0 ml-auto text-[10px] text-emerald-400/60">→ bảng thu nhập</span>
                         )}
@@ -370,20 +367,24 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
                     </td>
                     {/* year cells */}
                     {YEARS.map((year) => {
-                      const result = calcResults[year]!;
-                      const calcVal = !isInput ? calcGet(result, row.id) : 0;
-                      const inputVal = isInput ? (localValues[row.id]?.[year] ?? 0) : 0;
+                      const result   = calcResults[year]!;
+                      const calcVal  = !isInput ? calcGet(result, row.id) : 0;
+                      const inputVal = isInput ? (displayValues[row.id]?.[year] ?? 0) : 0;
                       return (
                         <td key={year} className={`px-2 py-2 text-right tabular-nums ${year === CURRENT_YEAR ? "bg-primary/5" : ""} ${isFCF ? "bg-emerald-500/5" : ""}`}>
-                          {isInput ? (
+                          {isInput && calcEditMode ? (
                             <input
                               type="number"
                               min={0}
                               className="w-full text-right bg-transparent border-b border-border/40 outline-none focus:border-primary tabular-nums text-xs py-0.5 placeholder:text-muted-foreground/20"
-                              value={inputVal || ""}
+                              value={editValues[row.id]?.[year] || ""}
                               placeholder="—"
                               onChange={(e) => setVal(row.id, year, Number(e.target.value) || 0)}
                             />
+                          ) : isInput ? (
+                            <span className={inputVal === 0 ? "text-muted-foreground/30" : ""}>
+                              {inputVal === 0 ? "—" : inputVal.toLocaleString("vi-VN")}
+                            </span>
                           ) : isPlain ? (
                             <span className={`${isSub ? "text-muted-foreground" : ""} ${calcVal === 0 ? "text-muted-foreground/30" : ""}`}>
                               {calcVal === 0 ? "—" : `${calcVal.toLocaleString("vi-VN")}${plainUnit ? ` ${plainUnit}` : ""}`}
