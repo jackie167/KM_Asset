@@ -200,6 +200,54 @@ function calcGet(r: CalcResult, id: string): number {
   return (r as unknown as Record<string, number>)[id] ?? 0;
 }
 
+// ── CSV utilities ─────────────────────────────────────────────────────────────
+
+type InputRowDef = { kind: "input"; id: string; label: string; unit: string; indent?: boolean };
+
+function getInputRows(t: CalcType): InputRowDef[] {
+  return getCalcRows(t).filter((r): r is InputRowDef => r.kind === "input");
+}
+
+function generateCSV(sourceName: string, calcType: CalcType, values: CalcValues): string {
+  const rows = getInputRows(calcType);
+  const commentRow = ["# Năm", ...rows.map((r) => `${r.label} (${r.unit})`)].join(",");
+  const headerRow  = ["year",  ...rows.map((r) => r.id)].join(",");
+  const dataRows   = YEARS.map((year) =>
+    [year, ...rows.map((r) => values[r.id]?.[year] ?? 0)].join(",")
+  );
+  return [commentRow, headerRow, ...dataRows].join("\n");
+}
+
+function parseCSV(text: string): CalcValues {
+  const result: CalcValues = {};
+  const lines = text.trim().split(/\r?\n/);
+  let headers: string[] | null = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const cols = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    if (!headers) { headers = cols.map((h) => h.toLowerCase()); continue; }
+
+    const yearIdx = headers.indexOf("year");
+    if (yearIdx === -1) continue;
+    const year = Number(cols[yearIdx]);
+    if (!YEARS.includes(year)) continue;
+
+    for (let i = 0; i < headers.length; i++) {
+      if (i === yearIdx) continue;
+      const rowId = headers[i];
+      if (!rowId) continue;
+      const raw = cols[i]?.replace(/[^\d.-]/g, "") ?? "";
+      const value = parseFloat(raw);
+      if (!Number.isFinite(value)) continue;
+      result[rowId] ??= {};
+      result[rowId]![year] = value;
+    }
+  }
+  return result;
+}
+
 // ── ProjectCalculator ─────────────────────────────────────────────────────────
 
 type CalcEntry = { id: number; sourceId: number; rowId: string; year: number; value: string };
@@ -211,6 +259,8 @@ const LAYOUT_META: Record<CalcType, { label: string; desc: string }> = {
 
 function ProjectCalculator({ source }: { source: IncomeSource }) {
   const qc = useQueryClient();
+
+  const importRef = useRef<HTMLInputElement>(null);
 
   // null = chưa chọn layout (hiện picker)
   const [selectedType, setSelectedType] = useState<CalcType | null>(null);
@@ -335,6 +385,39 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
     return map;
   }, [displayValues, activeType]);
 
+  // ── CSV export / import ──────────────────────────────────────────────────────
+
+  const handleExport = () => {
+    const csv = generateCSV(source.name, activeType, displayValues);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = `${source.name.replace(/\s+/g, "-")}-forecast.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const parsed = parseCSV(ev.target?.result as string);
+      // Merge parsed values on top of current dbValues, then enter edit mode
+      const base: CalcValues = {};
+      for (const [k, v] of Object.entries(dbValues)) base[k] = { ...v };
+      for (const [rowId, yearMap] of Object.entries(parsed)) {
+        base[rowId] = { ...(base[rowId] ?? {}), ...yearMap };
+      }
+      setEditValues(base);
+      setEditCalcType(selectedType ?? "direct");
+      setCalcEditMode(true);
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // reset so same file can be re-imported
+  };
+
   const fillRowDef = getCalcRows(activeType).find((r) => r.kind === "input" && r.id === fillRow);
 
   // ── layout picker (shown for new projects with no saved type) ─────────────
@@ -389,15 +472,21 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
                 </button>
               ))}
             </div>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" title="Xuất CSV" onClick={handleExport}>↓ CSV</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" title="Nhập CSV" onClick={() => importRef.current?.click()}>↑ CSV</Button>
             <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={saveMut.isPending}>
               {saveMut.isPending ? "Đang lưu…" : "Lưu"}
             </Button>
             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={cancelCalcEdit}>Huỷ</Button>
           </div>
         ) : (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={enterCalcEdit} disabled={calcQ.isLoading}>
-            Chỉnh sửa
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" title="Xuất CSV" onClick={handleExport}>↓ CSV</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" title="Nhập CSV" onClick={() => importRef.current?.click()}>↑ CSV</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={enterCalcEdit} disabled={calcQ.isLoading}>
+              Chỉnh sửa
+            </Button>
+          </div>
         )}
       </div>
 
@@ -518,6 +607,9 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
           </table>
         </div>
       )}
+
+      {/* hidden CSV import input */}
+      <input ref={importRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFile} />
 
       {/* fill dialog */}
       <Dialog open={!!fillRow} onOpenChange={(o) => !o && setFillRow(null)}>
