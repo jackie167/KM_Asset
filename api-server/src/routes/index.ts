@@ -14,6 +14,7 @@ import baseAssetsRouter from "./baseAssets.js";
 import incomeExpenseRouter from "./incomeExpense.js";
 import expenseForecastRouter from "./expenseForecast.js";
 import incomePlanRouter from "./incomePlan.js";
+import aiRouter from "./ai.js";
 
 const router: IRouter = Router();
 
@@ -30,6 +31,7 @@ router.use(baseAssetsRouter);
 router.use(incomeExpenseRouter);
 router.use(expenseForecastRouter);
 router.use(incomePlanRouter);
+router.use(aiRouter);
 router.use(pricesRouter);
 router.use(snapshotsRouter);
 

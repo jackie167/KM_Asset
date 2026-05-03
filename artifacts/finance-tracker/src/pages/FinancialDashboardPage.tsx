@@ -9,6 +9,7 @@ import { formatVND, formatVNDFull } from "@/pages/assets/utils";
 import { fetchForecastTrades, fetchIncomeExpenseCashflowData } from "@/lib/asset-forecast";
 import { buildForecastLoanEventsWithTradeSettlements, buildForecastLoanSchedule, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
 import { fetchBaseAssetHoldings, fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
+import AIPanel from "@/components/AIPanel";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -379,6 +380,7 @@ export default function FinancialDashboardPage() {
       <PageHeader
         title="Financial Dashboard"
         subtitle="Tổng quan sức khoẻ tài chính cá nhân"
+        inlineRight={<AIPanel />}
         actions={[{
           kind: "item",
           label: hideValues ? "Hiện số liệu" : "Ẩn số liệu",
