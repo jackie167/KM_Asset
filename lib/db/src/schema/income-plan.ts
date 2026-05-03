@@ -28,5 +28,22 @@ export const incomeForecastTable = pgTable(
   }),
 );
 
+export const incomeProjectCalcTable = pgTable(
+  "income_project_calc",
+  {
+    id: serial("id").primaryKey(),
+    sourceId: integer("source_id").notNull().references(() => incomeSourcesTable.id, { onDelete: "cascade" }),
+    rowId: text("row_id").notNull(),
+    year: integer("year").notNull(),
+    value: numeric("value", { precision: 22, scale: 6 }).notNull().default("0"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  },
+  (t) => ({
+    uniqueSourceRowYear: uniqueIndex("income_project_calc_idx").on(t.sourceId, t.rowId, t.year),
+  }),
+);
+
 export type IncomeSource = typeof incomeSourcesTable.$inferSelect;
 export type IncomeForecastRow = typeof incomeForecastTable.$inferSelect;
+export type IncomeProjectCalcRow = typeof incomeProjectCalcTable.$inferSelect;

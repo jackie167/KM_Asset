@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { asc, eq, inArray } from "drizzle-orm";
-import { db, incomeForecastTable, incomeSourcesTable } from "../../../lib/db/src/index.ts";
+import { db, incomeForecastTable, incomeProjectCalcTable, incomeSourcesTable } from "../../../lib/db/src/index.ts";
 
 const router: IRouter = Router();
 
@@ -112,6 +112,50 @@ router.put("/income-forecast", async (req, res): Promise<void> => {
         note: e.note ?? null,
       })),
     )
+    .returning();
+
+  res.json(rows);
+});
+
+// ── Project calculator ────────────────────────────────────────────────────────
+
+router.get("/income-project-calc/:sourceId", async (req, res): Promise<void> => {
+  const sourceId = Number(req.params.sourceId);
+  if (!Number.isInteger(sourceId)) { res.status(400).json({ error: "Invalid sourceId." }); return; }
+
+  const rows = await db
+    .select()
+    .from(incomeProjectCalcTable)
+    .where(eq(incomeProjectCalcTable.sourceId, sourceId))
+    .orderBy(asc(incomeProjectCalcTable.rowId), asc(incomeProjectCalcTable.year));
+  res.json(rows);
+});
+
+const CalcEntryInput = z.object({
+  rowId: z.string().trim().min(1).max(50),
+  year: z.number().int().min(2020).max(2100),
+  value: z.number().finite(),
+});
+
+router.put("/income-project-calc/:sourceId", async (req, res): Promise<void> => {
+  const sourceId = Number(req.params.sourceId);
+  if (!Number.isInteger(sourceId)) { res.status(400).json({ error: "Invalid sourceId." }); return; }
+
+  const parsed = z.object({ entries: z.array(CalcEntryInput) }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  await db.delete(incomeProjectCalcTable).where(eq(incomeProjectCalcTable.sourceId, sourceId));
+
+  if (parsed.data.entries.length === 0) { res.json([]); return; }
+
+  const rows = await db
+    .insert(incomeProjectCalcTable)
+    .values(parsed.data.entries.map((e) => ({
+      sourceId,
+      rowId: e.rowId,
+      year: e.year,
+      value: String(e.value),
+    })))
     .returning();
 
   res.json(rows);
