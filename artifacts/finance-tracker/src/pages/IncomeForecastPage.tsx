@@ -43,8 +43,13 @@ type IncomeSource = {
   color: string;
   sortOrder: number;
   active: boolean;
+  forecastMode: string;        // "manual" | "growth"
+  forecastBase: string | null; // numeric from DB
+  forecastRate: string | null; // numeric from DB
   note: string | null;
 };
+
+type SrcSettings = { mode: "manual" | "growth"; base: number; rate: number };
 
 type IncomeForecastEntry = {
   id: number;
@@ -552,8 +557,9 @@ function ProjectCalculator({ source }: { source: IncomeSource }) {
 export default function IncomeForecastPage() {
   const qc = useQueryClient();
 
-  const [editMode, setEditMode]   = useState(false);
-  const [cells, setCells]         = useState<CellMap>({});
+  const [editMode, setEditMode]         = useState(false);
+  const [cells, setCells]               = useState<CellMap>({});
+  const [editSrcSettings, setEditSrcSettings] = useState<Record<number, SrcSettings>>({});
   const [showAdd, setShowAdd]     = useState(false);
   const [newSrc, setNewSrc]       = useState({ name: "", type: "salary", color: COLOR_PRESETS[0]! });
 
@@ -618,11 +624,25 @@ export default function IncomeForecastPage() {
     return result;
   }, [calcAllQ.data, sources]);
 
-  // Business sources always show FCF from calculator (overrides dbCells / cells)
+  // Compute growth-mode cells for a given settings map (view or edit)
+  function applyGrowthSources(base: CellMap, srcs: IncomeSource[], settingsMap: Record<number, SrcSettings> | null): CellMap {
+    const merged = { ...base };
+    for (const src of srcs) {
+      if (isBusiness(src)) continue;
+      const s = settingsMap ? settingsMap[src.id] : { mode: src.forecastMode as "manual" | "growth", base: Number(src.forecastBase ?? 0), rate: Number(src.forecastRate ?? 0) };
+      if (!s || s.mode !== "growth" || s.base <= 0) continue;
+      merged[src.id] = {};
+      const r = s.rate / 100;
+      for (const year of YEARS) merged[src.id]![year] = s.base * Math.pow(1 + r, year - YEAR_START);
+    }
+    return merged;
+  }
+
   const displayCells = useMemo<CellMap>(() => {
     const base = editMode ? cells : dbCells;
-    return { ...base, ...businessFCF };
-  }, [editMode, cells, dbCells, businessFCF]);
+    const withFCF = { ...base, ...businessFCF };
+    return applyGrowthSources(withFCF, sources, editMode ? editSrcSettings : null);
+  }, [editMode, cells, dbCells, businessFCF, sources, editSrcSettings]); // eslint-disable-line
 
   const yearTotals = useMemo(() => {
     const t: Record<number, number> = {};
@@ -635,14 +655,25 @@ export default function IncomeForecastPage() {
 
   const enterEdit = () => {
     const copy: CellMap = {};
-    // only copy non-business sources; business sources come from calculator
-    for (const src of sources.filter((s) => !isBusiness(s)))
+    const settingsCopy: Record<number, SrcSettings> = {};
+    for (const src of sources.filter((s) => !isBusiness(s))) {
       copy[src.id] = { ...(dbCells[src.id] ?? {}) };
+      settingsCopy[src.id] = {
+        mode: (src.forecastMode ?? "manual") as "manual" | "growth",
+        base: Number(src.forecastBase ?? 0),
+        rate: Number(src.forecastRate ?? 0),
+      };
+    }
     setCells(copy);
+    setEditSrcSettings(settingsCopy);
     setEditMode(true);
   };
 
-  const cancelEdit = () => { setEditMode(false); setCells({}); };
+  const cancelEdit = () => { setEditMode(false); setCells({}); setEditSrcSettings({}); };
+
+  const setSourceSetting = (srcId: number, patch: Partial<SrcSettings>) => {
+    setEditSrcSettings((prev) => ({ ...prev, [srcId]: { ...prev[srcId]!, ...patch } }));
+  };
 
   const setCell = (srcId: number, year: number, val: number) => {
     setCells((prev) => ({ ...prev, [srcId]: { ...prev[srcId], [year]: val } }));
@@ -657,16 +688,32 @@ export default function IncomeForecastPage() {
   // ── mutations ─────────────────────────────────────────────────────────────────
 
   const saveMut = useMutation({
-    mutationFn: async (payload: { sourceId: number; year: number; amount: number }[]) => {
-      const res = await fetch("/api/income-forecast", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entries: payload }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
+    mutationFn: async ({ payload, settingsPatches }: {
+      payload: { sourceId: number; year: number; amount: number }[];
+      settingsPatches: { id: number; mode: string; base: number | null; rate: number | null }[];
+    }) => {
+      await Promise.all([
+        fetch("/api/income-forecast", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entries: payload }),
+        }),
+        ...settingsPatches.map(({ id, mode, base, rate }) =>
+          fetch(`/api/income-sources/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ forecastMode: mode, forecastBase: base, forecastRate: rate }),
+          })
+        ),
+      ]);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["income-forecast"] }); setEditMode(false); setCells({}); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["income-forecast"] });
+      qc.invalidateQueries({ queryKey: ["income-sources"] });
+      setEditMode(false);
+      setCells({});
+      setEditSrcSettings({});
+    },
   });
 
   const addMut = useMutation({
@@ -702,14 +749,21 @@ export default function IncomeForecastPage() {
 
   const handleSave = () => {
     const payload: { sourceId: number; year: number; amount: number }[] = [];
-    // business sources are read-only in this table; skip them
+    const settingsPatches: { id: number; mode: string; base: number | null; rate: number | null }[] = [];
+
     for (const src of sources.filter((s) => !isBusiness(s))) {
-      for (const year of YEARS) {
-        const amount = cells[src.id]?.[year] ?? 0;
-        if (amount !== 0) payload.push({ sourceId: src.id, year, amount });
+      const s = editSrcSettings[src.id];
+      if (!s) continue;
+      settingsPatches.push({ id: src.id, mode: s.mode, base: s.mode === "growth" ? s.base : null, rate: s.mode === "growth" ? s.rate : null });
+      if (s.mode === "manual") {
+        for (const year of YEARS) {
+          const amount = cells[src.id]?.[year] ?? 0;
+          if (amount !== 0) payload.push({ sourceId: src.id, year, amount });
+        }
       }
+      // growth mode: no per-year entries saved (formula-driven)
     }
-    saveMut.mutate(payload);
+    saveMut.mutate({ payload, settingsPatches });
   };
 
   const isLoading = sourcesQ.isLoading || entriesQ.isLoading;
@@ -778,8 +832,9 @@ export default function IncomeForecastPage() {
                       key={src.id}
                       className={`border-b border-border/50 transition-colors ${clickable ? "hover:bg-muted/30" : "hover:bg-muted/20"} ${isSelected ? "bg-primary/5" : ""}`}
                     >
+                      {/* source label cell */}
                       <td
-                        className={`sticky left-0 z-10 px-4 py-2.5 border-r border-border/40 ${isSelected ? "bg-primary/5" : "bg-background"} ${clickable ? "cursor-pointer" : ""}`}
+                        className={`sticky left-0 z-10 px-4 border-r border-border/40 ${isSelected ? "bg-primary/5" : "bg-background"} ${clickable ? "cursor-pointer" : ""} ${editMode && !clickable ? "py-2" : "py-2.5"}`}
                         onClick={() => handleSourceClick(src)}
                       >
                         <div className="flex items-center gap-2 min-w-0">
@@ -790,22 +845,56 @@ export default function IncomeForecastPage() {
                           )}
                           <span className="shrink-0 w-2.5 h-2.5 rounded-full" style={{ backgroundColor: src.color }} />
                           <span className="font-medium truncate">{src.name}</span>
-                          <span className="shrink-0 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded leading-none">
-                            {typeLabel(src.type)}
-                          </span>
-                          {clickable && !isSelected && (
-                            <ChevronRight size={11} className="shrink-0 ml-auto text-muted-foreground/40" />
+                          <span className="shrink-0 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded leading-none">{typeLabel(src.type)}</span>
+                          {/* view mode: growth badge */}
+                          {!editMode && !clickable && src.forecastMode === "growth" && src.forecastRate && (
+                            <span className="shrink-0 ml-auto text-[10px] text-emerald-400 font-medium">↗ {Number(src.forecastRate)}%/năm</span>
                           )}
-                          {clickable && isSelected && (
-                            <span className="shrink-0 ml-auto text-[10px] text-primary/60">← bảng tính</span>
-                          )}
+                          {clickable && !isSelected && <ChevronRight size={11} className="shrink-0 ml-auto text-muted-foreground/40" />}
+                          {clickable && isSelected && <span className="shrink-0 ml-auto text-[10px] text-primary/60">← bảng tính</span>}
                         </div>
+                        {/* edit mode: mode toggle + rate input for non-business sources */}
+                        {editMode && !clickable && editSrcSettings[src.id] && (
+                          <div className="flex items-center gap-1.5 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center rounded border border-border overflow-hidden text-[10px]">
+                              {(["manual", "growth"] as const).map((m, i) => (
+                                <button
+                                  key={m}
+                                  className={`px-1.5 py-0.5 transition-colors ${i > 0 ? "border-l border-border" : ""} ${editSrcSettings[src.id]!.mode === m ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
+                                  onClick={() => setSourceSetting(src.id, { mode: m })}
+                                >
+                                  {m === "manual" ? "Thủ công" : "↗ Tăng trưởng"}
+                                </button>
+                              ))}
+                            </div>
+                            {editSrcSettings[src.id]!.mode === "growth" && (
+                              <>
+                                <input
+                                  type="number" min={0} step={1}
+                                  className="w-20 text-xs bg-transparent border-b border-border/60 outline-none focus:border-primary tabular-nums py-0.5 text-right placeholder:text-muted-foreground/30"
+                                  placeholder="Gốc 2026"
+                                  value={editSrcSettings[src.id]!.base || ""}
+                                  onChange={(e) => setSourceSetting(src.id, { base: Number(e.target.value) || 0 })}
+                                />
+                                <input
+                                  type="number" min={0} step={0.1}
+                                  className="w-12 text-xs bg-transparent border-b border-border/60 outline-none focus:border-primary tabular-nums py-0.5 text-right placeholder:text-muted-foreground/30"
+                                  placeholder="0"
+                                  value={editSrcSettings[src.id]!.rate || ""}
+                                  onChange={(e) => setSourceSetting(src.id, { rate: Number(e.target.value) || 0 })}
+                                />
+                                <span className="text-[10px] text-muted-foreground">%/năm</span>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </td>
                       {YEARS.map((year) => {
                         const val = displayCells[src.id]?.[year] ?? 0;
+                        const isGrowth = !clickable && editMode && editSrcSettings[src.id]?.mode === "growth";
                         return (
                           <td key={year} className={`px-3 py-2.5 text-right tabular-nums ${year === CURRENT_YEAR ? "bg-primary/5" : ""} ${isSelected ? "bg-primary/5" : ""}`}>
-                            {editMode && !clickable ? (
+                            {editMode && !clickable && !isGrowth ? (
                               <input
                                 type="number" min={0} step={1_000_000}
                                 className="w-full text-right bg-transparent border-b border-border outline-none focus:border-primary tabular-nums text-xs py-0.5 placeholder:text-muted-foreground/30"
@@ -814,7 +903,9 @@ export default function IncomeForecastPage() {
                                 onChange={(e) => setCell(src.id, year, Number(e.target.value) || 0)}
                               />
                             ) : (
-                              <span className={`${val > 0 ? "text-foreground" : "text-muted-foreground/30"} ${clickable && val > 0 ? "text-emerald-400" : ""}`}>{fmtVND(val)}</span>
+                              <span className={`${val > 0 ? "text-foreground" : "text-muted-foreground/30"} ${clickable && val > 0 ? "text-emerald-400" : ""} ${isGrowth && val > 0 ? "text-blue-400" : ""}`}>
+                                {fmtVND(val)}
+                              </span>
                             )}
                           </td>
                         );

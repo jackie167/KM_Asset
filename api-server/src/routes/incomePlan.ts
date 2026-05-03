@@ -44,6 +44,9 @@ const SourcePatch = z.object({
   type: z.string().trim().max(50).optional(),
   color: z.string().trim().max(30).optional(),
   sortOrder: z.number().int().optional(),
+  forecastMode: z.enum(["manual", "growth"]).optional(),
+  forecastBase: z.number().nonnegative().nullable().optional(),
+  forecastRate: z.number().nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
 });
 
@@ -54,9 +57,14 @@ router.patch("/income-sources/:id", async (req, res): Promise<void> => {
   const parsed = SourcePatch.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
+  const { forecastBase, forecastRate, ...rest } = parsed.data;
   const [row] = await db
     .update(incomeSourcesTable)
-    .set(parsed.data)
+    .set({
+      ...rest,
+      ...(forecastBase !== undefined ? { forecastBase: forecastBase != null ? String(forecastBase) : null } : {}),
+      ...(forecastRate !== undefined ? { forecastRate: forecastRate != null ? String(forecastRate) : null } : {}),
+    })
     .where(eq(incomeSourcesTable.id, id))
     .returning();
   if (!row) { res.status(404).json({ error: "Source not found." }); return; }
