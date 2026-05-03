@@ -125,16 +125,14 @@ export default function AIPanel() {
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Đề xuất thông số</p>
                   <div className="space-y-2">
                     {analysis.suggestions.map((s, i) => (
-                      <div key={i} className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold">{s.area}</span>
-                          <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
-                            <span className="text-muted-foreground line-through">{s.current}</span>
-                            <span className="text-muted-foreground">→</span>
-                            <span className="text-primary font-semibold">{s.suggested}</span>
-                          </div>
+                      <div key={i} className="rounded-lg border border-border bg-muted/20 px-3 py-3 space-y-2">
+                        <p className="text-xs font-semibold">{s.area}</p>
+                        <div className="flex items-center gap-2 text-xs flex-wrap">
+                          <span className="text-muted-foreground line-through break-all">{s.current}</span>
+                          <span className="text-muted-foreground shrink-0">→</span>
+                          <span className="text-primary font-semibold break-all">{s.suggested}</span>
                         </div>
-                        <p className="text-[11px] text-muted-foreground">{s.reason}</p>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">{s.reason}</p>
                       </div>
                     ))}
                   </div>
