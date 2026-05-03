@@ -220,6 +220,33 @@ const LABEL_TO_ID: Map<string, string> = (() => {
   return m;
 })();
 
+// RFC 4180-compliant CSV row parser — handles quoted fields with embedded commas
+function parseCsvRow(line: string): string[] {
+  const fields: string[] = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (i === line.length) { fields.push(""); break; }
+    if (line[i] === '"') {
+      i++; // skip opening quote
+      let field = "";
+      while (i < line.length) {
+        if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2; }
+        else if (line[i] === '"') { i++; break; }
+        else field += line[i++];
+      }
+      fields.push(field.trim());
+      while (i < line.length && line[i] !== ',') i++;
+      i++; // skip comma
+    } else {
+      const end = line.indexOf(',', i);
+      if (end === -1) { fields.push(line.slice(i).trim()); break; }
+      fields.push(line.slice(i, end).trim());
+      i = end + 1;
+    }
+  }
+  return fields;
+}
+
 // Format: first row = "Chỉ tiêu", years as columns (matches table layout)
 function generateCSV(_sourceName: string, calcType: CalcType, values: CalcValues): string {
   const rows   = getInputRows(calcType);
@@ -232,10 +259,12 @@ function generateCSV(_sourceName: string, calcType: CalcType, values: CalcValues
 
 function parseCSV(text: string): CalcValues {
   const result: CalcValues = {};
-  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
+  // strip BOM if present (Excel UTF-8 CSV)
+  const cleaned = text.replace(/^﻿/, "");
+  const lines = cleaned.trim().split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return result;
 
-  const firstCols = lines[0]!.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+  const firstCols = parseCsvRow(lines[0]!);
   const firstKey  = firstCols[0]?.toLowerCase() ?? "";
 
   if (firstKey === "chỉ tiêu" || firstKey === "chi tieu") {
@@ -246,12 +275,12 @@ function parseCSV(text: string): CalcValues {
       if (YEARS.includes(y)) yearMap.push({ col: i, year: y });
     }
     for (const raw of lines.slice(1)) {
-      const cols  = raw.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+      const cols  = parseCsvRow(raw);
       const rowId = LABEL_TO_ID.get(cols[0]?.toLowerCase() ?? "");
       if (!rowId) continue;
       result[rowId] ??= {};
       for (const { col, year } of yearMap) {
-        const v = parseFloat(cols[col]?.replace(/[^\d.-]/g, "") ?? "");
+        const v = parseFloat((cols[col] ?? "").replace(/[^\d.-]/g, ""));
         if (Number.isFinite(v)) result[rowId]![year] = v;
       }
     }
@@ -260,13 +289,13 @@ function parseCSV(text: string): CalcValues {
     const headers = firstCols.map((h) => h.toLowerCase());
     for (const raw of lines.slice(1)) {
       if (raw.trimStart().startsWith("#")) continue;
-      const cols = raw.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+      const cols = parseCsvRow(raw);
       const year = Number(cols[0]);
       if (!YEARS.includes(year)) continue;
       for (let i = 1; i < headers.length; i++) {
         const rowId = LABEL_TO_ID.get(headers[i] ?? "");
         if (!rowId) continue;
-        const v = parseFloat(cols[i]?.replace(/[^\d.-]/g, "") ?? "");
+        const v = parseFloat((cols[i] ?? "").replace(/[^\d.-]/g, ""));
         if (Number.isFinite(v)) {
           result[rowId] ??= {};
           result[rowId]![year] = v;

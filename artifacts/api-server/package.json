@@ -9,6 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "cheerio": "^1.2.0",
