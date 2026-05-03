@@ -206,10 +206,13 @@ function ProjectCalculator({
 
   // apply dialog
   const [showApply, setShowApply]   = useState(false);
-  const [applyTarget, setApplyTarget] = useState<number>(source.id);
+
+  // track whether user has made unsaved changes
+  const [userModified, setUserModified] = useState(false);
 
   const setVal = (rowId: string, year: number, v: number) => {
     setLocalValues((prev) => ({ ...prev, [rowId]: { ...prev[rowId], [year]: v } }));
+    setUserModified(true);
   };
 
   const openFill = (rowId: string) => {
@@ -227,6 +230,7 @@ function ProjectCalculator({
       for (const year of YEARS) next[fillRow]![year] = base * Math.pow(1 + rate, year - YEAR_START);
       return next;
     });
+    setUserModified(true);
     setFillRow(null);
   };
 
@@ -241,18 +245,30 @@ function ProjectCalculator({
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["income-project-calc", source.id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["income-project-calc", source.id] });
+      setUserModified(false);
+    },
   });
 
-  const handleSave = () => {
+  const buildEntries = (vals: CalcValues) => {
     const entries: { rowId: string; year: number; value: number }[] = [];
-    for (const [rowId, yearMap] of Object.entries(localValues)) {
+    for (const [rowId, yearMap] of Object.entries(vals)) {
       for (const [y, value] of Object.entries(yearMap)) {
         if (value !== 0) entries.push({ rowId, year: Number(y), value });
       }
     }
-    saveMut.mutate(entries);
+    return entries;
   };
+
+  const handleSave = () => saveMut.mutate(buildEntries(localValues));
+
+  // auto-save 2s after user stops typing / filling
+  useEffect(() => {
+    if (!userModified) return;
+    const t = setTimeout(() => saveMut.mutate(buildEntries(localValues)), 2000);
+    return () => clearTimeout(t);
+  }, [localValues, userModified]); // eslint-disable-line
 
   // compute results
   const calcResults = useMemo(() => {
@@ -282,14 +298,20 @@ function ProjectCalculator({
           <span className="text-sm font-semibold">{source.name}</span>
           <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Kinh doanh</span>
         </div>
-        <Button
-          size="sm"
-          className="h-7 text-xs"
-          onClick={handleSave}
-          disabled={saveMut.isPending}
-        >
-          {saveMut.isPending ? "Đang lưu…" : "Lưu bảng tính"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {saveMut.isPending && (
+            <span className="text-[11px] text-muted-foreground animate-pulse">Đang lưu…</span>
+          )}
+          {!saveMut.isPending && saveMut.isSuccess && !userModified && (
+            <span className="text-[11px] text-emerald-400">✓ Đã lưu</span>
+          )}
+          {!saveMut.isPending && userModified && (
+            <span className="text-[11px] text-amber-400">● Chưa lưu</span>
+          )}
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleSave} disabled={saveMut.isPending}>
+            Lưu ngay
+          </Button>
+        </div>
       </div>
 
       {/* table */}
@@ -450,7 +472,18 @@ function ProjectCalculator({
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setShowApply(false)}>Huỷ</Button>
-            <Button size="sm" onClick={() => { onApplyFCF(source.id, fcfByYear); setShowApply(false); }}>Áp dụng</Button>
+            <Button
+              size="sm"
+              disabled={saveMut.isPending}
+              onClick={async () => {
+                // save to DB before applying so values are never lost
+                try { await saveMut.mutateAsync(buildEntries(localValues)); } catch { /* best-effort */ }
+                onApplyFCF(source.id, fcfByYear);
+                setShowApply(false);
+              }}
+            >
+              {saveMut.isPending ? "Đang lưu…" : "Lưu & Áp dụng"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
