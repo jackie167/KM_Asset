@@ -1,12 +1,80 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { asc, eq } from "drizzle-orm";
-import { db, incomeExpenseTable } from "../../../lib/db/src/index.ts";
+import {
+  db,
+  incomeExpenseTable,
+  incomeSourcesTable,
+  incomeForecastTable,
+  incomeProjectCalcTable,
+} from "../../../lib/db/src/index.ts";
 
 const router: IRouter = Router();
 
-function serialize(row: typeof incomeExpenseTable.$inferSelect) {
-  const income = parseFloat(String(row.income));
+const INCOME_YEAR_START = 2026;
+const INCOME_YEAR_END   = 2044;
+const INCOME_YEARS = Array.from({ length: INCOME_YEAR_END - INCOME_YEAR_START + 1 }, (_, i) => INCOME_YEAR_START + i);
+
+function fcf(inp: Record<string, number>, type: "direct" | "per_ha"): number {
+  const g = (k: string) => inp[k] ?? 0;
+  const rev  = type === "per_ha" ? g("area") * g("yield_per_ha") * g("price") : g("revenue_direct");
+  const cogs = type === "per_ha" ? g("area") * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead")) : g("cogs_direct");
+  const dep  = g("depreciation");
+  const ebit = (rev - cogs) - dep - g("interest") - g("sga");
+  return (ebit - Math.max(0, ebit) * (g("tax_rate") / 100)) + dep - g("capex") - g("delta_wc");
+}
+
+async function computedIncomeByYear(): Promise<Record<number, number>> {
+  const [sources, forecastEntries, calcEntries] = await Promise.all([
+    db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.active, true)),
+    db.select().from(incomeForecastTable),
+    db.select().from(incomeProjectCalcTable),
+  ]);
+
+  const totals: Record<number, number> = {};
+  for (const y of INCOME_YEARS) totals[y] = 0;
+
+  const fcBySource: Record<number, Record<number, number>> = {};
+  for (const e of forecastEntries) {
+    fcBySource[e.sourceId] ??= {};
+    fcBySource[e.sourceId]![e.year] = Number(e.amount);
+  }
+
+  const calcBySource: Record<number, typeof calcEntries> = {};
+  for (const e of calcEntries) { calcBySource[e.sourceId] ??= []; calcBySource[e.sourceId]!.push(e); }
+
+  for (const src of sources) {
+    if (src.type === "business") {
+      const rows = calcBySource[src.id] ?? [];
+      let calcType: "direct" | "per_ha" = "direct";
+      const vals: Record<string, Record<number, number>> = {};
+      for (const e of rows) {
+        if (e.rowId === "_calc_type") { calcType = Number(e.value) === 1 ? "per_ha" : "direct"; continue; }
+        vals[e.rowId] ??= {};
+        vals[e.rowId]![e.year] = Number(e.value);
+      }
+      for (const year of INCOME_YEARS) {
+        const inp: Record<string, number> = {};
+        for (const [rowId, ym] of Object.entries(vals)) inp[rowId] = ym[year] ?? 0;
+        totals[year]! += fcf(inp, calcType);
+      }
+    } else if (src.forecastMode === "growth" && Number(src.forecastBase) > 0) {
+      const base = Number(src.forecastBase);
+      const rate = Number(src.forecastRate) || 0;
+      for (const year of INCOME_YEARS) {
+        totals[year]! += base * Math.pow(1 + rate / 100, year - INCOME_YEAR_START);
+      }
+    } else {
+      const stored = fcBySource[src.id] ?? {};
+      for (const year of INCOME_YEARS) totals[year]! += stored[year] ?? 0;
+    }
+  }
+
+  return totals;
+}
+
+function serialize(row: typeof incomeExpenseTable.$inferSelect, incomeOverride?: number) {
+  const income = incomeOverride ?? parseFloat(String(row.income));
   const otherIncome = parseFloat(String(row.otherIncome));
   const expense = Math.abs(parseFloat(String(row.expense)));
   const otherExpense = Math.abs(parseFloat(String(row.otherExpense)));
@@ -43,8 +111,33 @@ const ReplaceBody = z.object({
 });
 
 router.get("/income-expense", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(incomeExpenseTable).orderBy(asc(incomeExpenseTable.year));
-  res.json(rows.map(serialize));
+  const [dbRows, incomeMap] = await Promise.all([
+    db.select().from(incomeExpenseTable).orderBy(asc(incomeExpenseTable.year)),
+    computedIncomeByYear(),
+  ]);
+
+  // Override income from income sources for forecast years; keep DB value for historical years
+  const rowByYear = new Map(dbRows.map((r) => [r.year, r]));
+
+  // Include all DB years + any forecast year that has computed income
+  const allYears = new Set([
+    ...dbRows.map((r) => r.year),
+    ...INCOME_YEARS.filter((y) => (incomeMap[y] ?? 0) > 0),
+  ]);
+
+  const EMPTY_ROW_BASE = {
+    id: 0, income: "0", otherIncome: "0", expense: "0",
+    otherExpense: "0", totalInterest: "0", note: null,
+    createdAt: new Date(), updatedAt: new Date(),
+  };
+
+  const result = [...allYears].sort((a, b) => a - b).map((year) => {
+    const row = rowByYear.get(year) ?? { ...EMPTY_ROW_BASE, year };
+    const override = INCOME_YEARS.includes(year) ? incomeMap[year] : undefined;
+    return serialize(row, override);
+  });
+
+  res.json(result);
 });
 
 router.put("/income-expense", async (req, res): Promise<void> => {

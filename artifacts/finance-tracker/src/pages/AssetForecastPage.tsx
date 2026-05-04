@@ -209,14 +209,6 @@ export default function AssetForecastPage() {
 
   const currentAssetQuery = useQuery({ queryKey: ["asset-forecast-current-asset"], queryFn: fetchCurrentAssetData });
   const freeCashQuery = useQuery({ queryKey: ["asset-forecast-free-cash-rows"], queryFn: fetchFreeCashRows });
-  const incomeTotalsQuery = useQuery({
-    queryKey: ["income-forecast-totals"],
-    queryFn: async () => {
-      const res = await fetch("/api/income-forecast/totals");
-      if (!res.ok) return [] as { year: number; total: number }[];
-      return res.json() as Promise<{ year: number; total: number }[]>;
-    },
-  });
   const forecastTradesQuery = useQuery({ queryKey: ["asset-forecast-trades"], queryFn: fetchForecastTrades });
   const expenseForecastQuery = useQuery({
     queryKey: ["expense-forecast"],
@@ -238,11 +230,6 @@ export default function AssetForecastPage() {
   const forecastLoanEventsQuery = useQuery({ queryKey: ["asset-forecast-loan-events"], queryFn: fetchForecastLoanEvents });
 
   const currentAssetRows = useMemo(() => currentAssetQuery.data ?? [], [currentAssetQuery.data]);
-  const incomeByYear = useMemo(() => {
-    const map: Record<number, number> = {};
-    for (const { year, total } of incomeTotalsQuery.data ?? []) map[year] = total;
-    return map;
-  }, [incomeTotalsQuery.data]);
   const freeCashRows = useMemo(() => freeCashQuery.data ?? [], [freeCashQuery.data]);
   const forecastTrades = useMemo(() => forecastTradesQuery.data ?? [], [forecastTradesQuery.data]);
   const forecastLoans = useMemo(() => forecastLoansQuery.data ?? [], [forecastLoansQuery.data]);
@@ -877,13 +864,11 @@ export default function AssetForecastPage() {
   const beginIncomeExpenseEdit = () => {
     const draft = new Map(freeCashRows.map((row) => [row.year, row]));
     setIncomeExpenseDraft(Object.fromEntries(FORECAST_YEARS.map((year) => {
-      const base = draft.get(year) ?? {
+      const row = draft.get(year) ?? {
         year, income: 0, otherIncome: 0, expense: 0,
         otherExpense: 0, totalInterest: 0, totalIncome: 0, totalExpense: 0, freeCash: 0,
       };
-      // override income with computed value from income sources
-      const income = incomeByYear[year] ?? base.income;
-      return [year, { ...base, income }];
+      return [year, row];
     })));
     setIncomeExpenseEditing(true);
   };
@@ -1109,8 +1094,7 @@ export default function AssetForecastPage() {
                       const tradeSettlement = tradeSettlementByYear.get(year) ?? 0;
                       const principalPayment = debtPrincipalPaymentByYear.get(year) ?? 0;
                       const loanInterest = debtInterestByYear.get(year) ?? 0;
-                      const computedIncome = incomeByYear[year] ?? row.income;
-                      const totalIncome = computedIncome + editRow.otherIncome;
+                      const totalIncome = editRow.income + editRow.otherIncome;
                       const totalExpense = editRow.expense + editRow.otherExpense + loanInterest;
                       const freeCash = finalFreeCashByYear.get(year) ?? 0;
                       const inputClass = "h-8 w-32 ml-auto text-right text-xs tabular-nums";
@@ -1118,7 +1102,7 @@ export default function AssetForecastPage() {
                         <tr key={row.year}>
                           <td className="py-2 pr-4 font-medium whitespace-nowrap">{row.year}</td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
-                            <span className="text-muted-foreground tabular-nums">{formatVNDFull(computedIncome)}</span>
+                            <span className="text-muted-foreground tabular-nums">{formatVNDFull(row.income)}</span>
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
                             {incomeExpenseEditing ? <Input defaultValue={String(editRow.otherIncome)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "otherIncome", event.target.value)} /> : formatVNDFull(row.otherIncome)}
