@@ -125,6 +125,74 @@ router.put("/income-forecast", async (req, res): Promise<void> => {
   res.json(rows);
 });
 
+// ── Income totals per year (computed: manual + growth + business FCF) ─────────
+
+const INCOME_YEAR_START = 2026;
+const INCOME_YEAR_END   = 2044;
+const INCOME_YEARS = Array.from({ length: INCOME_YEAR_END - INCOME_YEAR_START + 1 }, (_, i) => INCOME_YEAR_START + i);
+
+function computeFCFForTotals(inp: Record<string, number>, calcType: "direct" | "per_ha"): number {
+  const g = (id: string) => inp[id] ?? 0;
+  const revenue = calcType === "per_ha"
+    ? g("area") * g("yield_per_ha") * g("price")
+    : g("revenue_direct");
+  const cogs = calcType === "per_ha"
+    ? g("area") * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead"))
+    : g("cogs_direct");
+  const dep  = g("depreciation");
+  const ebit = (revenue - cogs) - dep - g("interest") - g("sga");
+  return (ebit - Math.max(0, ebit) * (g("tax_rate") / 100)) + dep - g("capex") - g("delta_wc");
+}
+
+router.get("/income-forecast/totals", async (_req, res): Promise<void> => {
+  const [sources, forecastEntries, calcEntries] = await Promise.all([
+    db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.active, true)),
+    db.select().from(incomeForecastTable),
+    db.select().from(incomeProjectCalcTable),
+  ]);
+
+  const totals: Record<number, number> = {};
+  for (const y of INCOME_YEARS) totals[y] = 0;
+
+  const fcBySource: Record<number, Record<number, number>> = {};
+  for (const e of forecastEntries) {
+    fcBySource[e.sourceId] ??= {};
+    fcBySource[e.sourceId]![e.year] = Number(e.amount);
+  }
+
+  const calcBySource: Record<number, typeof calcEntries> = {};
+  for (const e of calcEntries) { calcBySource[e.sourceId] ??= []; calcBySource[e.sourceId]!.push(e); }
+
+  for (const src of sources) {
+    if (src.type === "business") {
+      const rows = calcBySource[src.id] ?? [];
+      let calcType: "direct" | "per_ha" = "direct";
+      const vals: Record<string, Record<number, number>> = {};
+      for (const e of rows) {
+        if (e.rowId === "_calc_type") { calcType = Number(e.value) === 1 ? "per_ha" : "direct"; continue; }
+        vals[e.rowId] ??= {};
+        vals[e.rowId]![e.year] = Number(e.value);
+      }
+      for (const year of INCOME_YEARS) {
+        const inp: Record<string, number> = {};
+        for (const [rowId, ym] of Object.entries(vals)) inp[rowId] = ym[year] ?? 0;
+        totals[year]! += computeFCFForTotals(inp, calcType);
+      }
+    } else if (src.forecastMode === "growth" && Number(src.forecastBase) > 0) {
+      const base = Number(src.forecastBase);
+      const rate = Number(src.forecastRate) || 0;
+      for (const year of INCOME_YEARS) {
+        totals[year]! += base * Math.pow(1 + rate / 100, year - INCOME_YEAR_START);
+      }
+    } else {
+      const stored = fcBySource[src.id] ?? {};
+      for (const year of INCOME_YEARS) totals[year]! += stored[year] ?? 0;
+    }
+  }
+
+  res.json(INCOME_YEARS.map((year) => ({ year, total: Math.round(totals[year]!) })));
+});
+
 // ── Project calculator ────────────────────────────────────────────────────────
 
 router.get("/income-project-calc", async (_req, res): Promise<void> => {

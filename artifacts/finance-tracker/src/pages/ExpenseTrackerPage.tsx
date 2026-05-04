@@ -190,6 +190,19 @@ export default function ExpenseTrackerPage() {
   const summaryQuery  = useQuery({ queryKey: ["expenses-summary", year], queryFn: () => getSummary(year) });
   const selectedYear = Number(year);
   const forecastQuery = useQuery({ queryKey: ["expense-forecast"], queryFn: getExpenseForecast });
+  const incomeTotalsQuery = useQuery({
+    queryKey: ["income-forecast-totals"],
+    queryFn: async () => {
+      const res = await fetch("/api/income-forecast/totals");
+      if (!res.ok) return [] as { year: number; total: number }[];
+      return res.json() as Promise<{ year: number; total: number }[]>;
+    },
+  });
+  const incomeByYear = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const { year, total } of incomeTotalsQuery.data ?? []) map[year] = total;
+    return map;
+  }, [incomeTotalsQuery.data]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["expenses", year] });
@@ -219,7 +232,22 @@ export default function ExpenseTrackerPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["expense-forecast"] }),
   });
 
-  const forecastRows = forecastQuery.data ?? [];
+  const forecastRows = useMemo(() => {
+    const rows = forecastQuery.data ?? [];
+    if (Object.keys(incomeByYear).length === 0) return rows;
+    return rows.map((r) => {
+      const income = incomeByYear[r.year] ?? r.income;
+      const totalIncome = income + r.otherIncome;
+      const investmentAmount = totalIncome * (r.investmentRatio / 100);
+      const availableAfterInvestment = totalIncome - investmentAmount;
+      const needTotal = r.needLiving + r.needTuition + r.needAllowance + r.needMaintenance;
+      const wantCatTotal = (r.wantShopping ?? 0) + (r.wantTravel ?? 0) + (r.wantSupport ?? 0) + (r.wantPersonal ?? 0) + (r.wantOther ?? 0);
+      const wantBudget = wantCatTotal > 0 ? wantCatTotal : r.wantBudget;
+      const spendingFundChange = availableAfterInvestment - needTotal - wantBudget;
+      return { ...r, income, totalIncome, investmentAmount, availableAfterInvestment, needTotal, wantBudget, spendingFundChange };
+    });
+  }, [forecastQuery.data, incomeByYear]);
+
   const selectedForecast = useMemo(
     () => forecastRows.find((row) => row.year === selectedYear) ?? forecastRows.findLast((row) => row.year <= selectedYear) ?? forecastRows[0],
     [forecastRows, selectedYear]
@@ -268,7 +296,7 @@ export default function ExpenseTrackerPage() {
     const sorted = [...forecastRows].sort((a, b) => a.year - b.year);
     const draft: typeof forecastDraft = {};
     for (let i = 0; i < sorted.length; i++) {
-      const row = sorted[i]!;
+      const row = { ...sorted[i]!, income: incomeByYear[sorted[i]!.year] ?? sorted[i]!.income };
       const prev = i > 0 ? draft[sorted[i - 1]!.year] : undefined;
       const shopping  = row.wantShopping ?? 0;
       const travel    = row.wantTravel   ?? 0;
@@ -302,6 +330,9 @@ export default function ExpenseTrackerPage() {
       const fieldValue = (value.trim() === "" && isNullable) ? null
         : Number.isFinite(numericValue) ? numericValue : (isNullable ? null : 0);
       const next = { ...row, [key]: fieldValue };
+      // income is auto-computed from Income Forecast; use computed value if available
+      const computedIncome = incomeByYear[year] ?? next.income;
+      if (key !== "income") next.income = computedIncome;
       const totalIncome = next.income + next.otherIncome;
       const investmentAmount = totalIncome * (next.investmentRatio / 100);
       const availableAfterInvestment = totalIncome - investmentAmount;
@@ -389,7 +420,7 @@ export default function ExpenseTrackerPage() {
                 indent?: boolean;
               };
               const dataRows: DataRow[] = [
-                { label: "Income",          field: "income",          className: "", render: (r, e, yr) => forecastEditing ? <Input value={String(e.income)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "income", ev.target.value)} /> : fmt(r.income, hide) },
+                { label: "Income",          field: "income",          className: "", render: (r, e, yr) => { const v = forecastEditing ? (incomeByYear[yr] ?? e.income) : (incomeByYear[yr] ?? r.income); return <span className={forecastEditing ? "text-muted-foreground text-xs tabular-nums pr-1" : ""}>{fmt(v, hide)}</span>; } },
                 { label: "Other income",    field: "otherIncome",     className: "", render: (r, e, yr) => forecastEditing ? <Input value={String(e.otherIncome)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "otherIncome", ev.target.value)} /> : fmt(r.otherIncome, hide) },
                 { label: "Invest %",        field: "investmentRatio", className: "", render: (r, e, yr) => forecastEditing ? <Input value={String(e.investmentRatio)} inputMode="decimal" className={inputCls} onChange={(ev) => updateForecastDraft(yr, "investmentRatio", ev.target.value)} /> : `${r.investmentRatio.toFixed(1)}%` },
                 { label: "Investment",      className: "text-emerald-400 font-semibold", render: (r, e) => fmt(e.investmentAmount, hide) },
