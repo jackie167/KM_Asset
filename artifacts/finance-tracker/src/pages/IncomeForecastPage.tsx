@@ -13,13 +13,9 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { YEAR_START, FORECAST_YEARS as YEARS, CURRENT_YEAR } from "@/lib/forecast-constants";
 
 // ─── shared constants ─────────────────────────────────────────────────────────
-
-const YEAR_START = 2026;
-const YEAR_END = 2044;
-const YEARS = Array.from({ length: YEAR_END - YEAR_START + 1 }, (_, i) => YEAR_START + i);
-const CURRENT_YEAR = new Date().getFullYear();
 
 const SOURCE_TYPES = [
   { value: "salary",     label: "Lương" },

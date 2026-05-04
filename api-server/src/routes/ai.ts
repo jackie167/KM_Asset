@@ -15,33 +15,15 @@ import {
   incomeForecastTable,
   priceHistoryTable,
 } from "../../../lib/db/src/index.ts";
+import { YEAR_START, FORECAST_YEARS, CalcType, computeFCF } from "../lib/income-calc.ts";
 
 const router: IRouter = Router();
 
 const CURRENT_YEAR = new Date().getFullYear();
-const YEAR_START = 2026;
-const YEAR_END   = 2044;
-const YEARS = Array.from({ length: YEAR_END - YEAR_START + 1 }, (_, i) => YEAR_START + i);
 
 function num(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-type CalcType = "direct" | "per_ha";
-
-function computeFCF(inp: Record<string, number>, calcType: CalcType = "direct"): number {
-  const g = (id: string) => inp[id] ?? 0;
-  const revenue = calcType === "per_ha"
-    ? g("area") * g("yield_per_ha") * g("price")
-    : g("revenue_direct");
-  const cogs = calcType === "per_ha"
-    ? g("area") * (g("cogs_material") + g("cogs_labor") + g("cogs_overhead"))
-    : g("cogs_direct");
-  const depreciation = g("depreciation");
-  const ebit         = (revenue - cogs) - depreciation - g("interest") - g("sga");
-  const net_profit   = ebit - Math.max(0, ebit) * (g("tax_rate") / 100);
-  return net_profit + depreciation - g("capex") - g("delta_wc");
 }
 
 function fmtB(v: number) {
@@ -104,11 +86,11 @@ function buildFinancialContext(
     if (src.forecastMode === "growth" && num(src.forecastBase) > 0) {
       const base = num(src.forecastBase);
       const rate = num(src.forecastRate);
-      const projected = YEARS.slice(0, 5).map((y) => `${y}: ${fmtB(base * Math.pow(1 + rate / 100, y - YEAR_START))}`).join(", ");
+      const projected = FORECAST_YEARS.slice(0, 5).map((y) => `${y}: ${fmtB(base * Math.pow(1 + rate / 100, y - YEAR_START))}`).join(", ");
       return `- ${src.name} (${src.type}, tăng trưởng ${rate}%/năm): ${projected}…`;
     }
     const stored = fcBySource[src.id] ?? {};
-    const byYear = YEARS.filter((y) => stored[y]).map((y) => `${y}: ${fmtB(stored[y]!)}`).join(", ");
+    const byYear = FORECAST_YEARS.filter((y) => stored[y]).map((y) => `${y}: ${fmtB(stored[y]!)}`).join(", ");
     return `- ${src.name} (${src.type}): ${byYear || "chưa nhập"}`;
   }).filter(Boolean).join("\n");
 
@@ -128,7 +110,7 @@ function buildFinancialContext(
       vals[e.rowId] ??= {};
       vals[e.rowId]![e.year] = num(e.value);
     }
-    const fcfYears = YEARS.map((year) => {
+    const fcfYears = FORECAST_YEARS.map((year) => {
       const inp: Record<string, number> = {};
       for (const [rowId, ym] of Object.entries(vals)) inp[rowId] = ym[year] ?? 0;
       return { year, fcf: computeFCF(inp, calcType) };
@@ -335,7 +317,7 @@ async function toolGetIncomeForecast(): Promise<string> {
         vals[e.rowId] ??= {};
         vals[e.rowId]![e.year] = num(e.value);
       }
-      const fcfYears = YEARS.map((year) => {
+      const fcfYears = FORECAST_YEARS.map((year) => {
         const inp: Record<string, number> = {};
         for (const [rowId, ym] of Object.entries(vals)) inp[rowId] = ym[year] ?? 0;
         return { year, fcf: computeFCF(inp, calcType) };
@@ -345,11 +327,11 @@ async function toolGetIncomeForecast(): Promise<string> {
     if (src.forecastMode === "growth" && num(src.forecastBase) > 0) {
       const base = num(src.forecastBase);
       const rate = num(src.forecastRate);
-      const sample = YEARS.slice(0, 5).map((y) => `${y}:${fmtB(base * Math.pow(1 + rate / 100, y - YEAR_START))}`).join(", ");
+      const sample = FORECAST_YEARS.slice(0, 5).map((y) => `${y}:${fmtB(base * Math.pow(1 + rate / 100, y - YEAR_START))}`).join(", ");
       return `- ${src.name} [${src.type}, tăng ${rate}%/năm]: ${sample}…`;
     }
     const stored = fcBySource[src.id] ?? {};
-    const byYear = YEARS.filter((y) => stored[y]).map((y) => `${y}:${fmtB(stored[y]!)}`).join(", ");
+    const byYear = FORECAST_YEARS.filter((y) => stored[y]).map((y) => `${y}:${fmtB(stored[y]!)}`).join(", ");
     return `- ${src.name} [${src.type}]: ${byYear || "chưa nhập"}`;
   });
   return `Nguồn thu nhập (${sources.length} nguồn):\n${lines.join("\n")}`;

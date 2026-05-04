@@ -2,7 +2,8 @@ import { CASHFLOW_SOURCE_SHEET, findColIdx, parseNum, type CashflowData } from "
 import { fetchBaseAssetHoldings } from "@/pages/wealthAllocationData";
 import type { HoldingItem } from "@/pages/assets/types";
 
-export const FORECAST_YEARS = Array.from({ length: 2044 - 2026 + 1 }, (_, i) => 2026 + i);
+import { FORECAST_YEARS } from "./forecast-constants";
+export { FORECAST_YEARS };
 export const INITIAL_2026_FREE_CASH = 7_370_845_000;
 export const INVEST_TYPES = ["cash", "stock", "gold", "fund", "crypto"] as const;
 export type InvestType = typeof INVEST_TYPES[number];
