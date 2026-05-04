@@ -20,6 +20,7 @@ const NAV_LINKS = [
   { href: "/asset-forecast",    label: "Dự báo tài sản" },
   { href: "/expenses",          label: "Chi tiêu" },
   { href: "/income-forecast",   label: "Kế hoạch thu nhập" },
+  { href: "/debug-ai",          label: "⚙ AI Debug" },
 ];
 
 export type MenuAction =
