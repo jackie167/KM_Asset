@@ -318,17 +318,10 @@ export default function FinancialDashboardPage() {
     hideValues ? "****" : full ? formatVNDFull(v) : formatVND(v);
 
   const totalAssetPnl = useMemo(() => {
-    // Exclude all investment/financial types from both sides to avoid counting portfolio P/L twice.
-    // wealthHoldings = non-financial base (forecast) + portfolio by type (cash/stock/etc.)
-    // We want only the non-financial base portion; pnl already captures investment P/L.
-    const currentFixedValue = wealthHoldings.reduce((sum, holding) => {
-      return isInvestmentHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
+    return wealthHoldings.reduce((sum, holding) => {
+      return sum + calculateHoldingPnL(holding, realizedPnLBySymbol, cashCostBasis);
     }, 0);
-    const baseFixedValue = (baseAssetsQuery.data ?? []).reduce((sum, holding) => {
-      return isInvestmentHolding(holding) ? sum : sum + (holding.currentValue ?? 0);
-    }, 0);
-    return currentFixedValue - baseFixedValue + pnl;
-  }, [baseAssetsQuery.data, pnl, wealthHoldings]);
+  }, [cashCostBasis, realizedPnLBySymbol, wealthHoldings]);
   const totalAssetPnlText = `${totalAssetPnl >= 0 ? "+" : ""}${fmt(totalAssetPnl, true)} P/L`;
   const xirrAnnual = xirrQuery.data?.xirrAnnual ?? null;
   const forecastDebt = useMemo(() => (

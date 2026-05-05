@@ -46,7 +46,7 @@ export default function PortfolioSummaryCard({
                   metric.tone === "positive"
                     ? "text-emerald-400"
                     : metric.tone === "negative"
-                      ? "text-red-300"
+                      ? "text-red-400"
                       : "text-foreground"
                 }`}
               >

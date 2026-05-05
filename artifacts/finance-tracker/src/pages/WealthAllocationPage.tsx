@@ -1,36 +1,52 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import AllocationChart from "@/pages/assets/AllocationChart";
 import AssetsHeader from "@/pages/assets/AssetsHeader";
 import HoldingsTable from "@/pages/assets/HoldingsTable";
 import PerformanceChart from "@/pages/assets/PerformanceChart";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
 import { formatTypeLabel, formatVND, formatVNDFull } from "@/pages/assets/utils";
+import { formatPercent } from "@/pages/assets/utils";
 import { fetchWealthAllocationHoldings, fetchWealthAllocationSummaryHoldings } from "@/pages/wealthAllocationData";
 import { fetchForecastTrades } from "@/lib/asset-forecast";
 import { buildForecastLoanEventsWithTradeSettlements, fetchForecastLoanEvents, fetchForecastLoans, getForecastDebtForYear } from "@/lib/forecast-loans";
-import { useToast } from "@/hooks/use-toast";
+import { getTradeNetAmount, type TradeOrder } from "@/pages/assets/TradeOrdersTable";
 
+const CASH_RETURN_INITIAL_AT = new Date("2026-01-01T00:00:00.000Z");
+type CashFlow = { kind: string; amount: number; occurredAt: string };
+
+function calcCashCostBasis(orders: TradeOrder[], cashCostOfCapital: number, cashFlows: CashFlow[]) {
+  const totalBuyFromCash = orders.reduce((s, o) => {
+    if (o.side !== "buy" || o.status !== "applied") return s;
+    if (o.fundingSource.trim().toUpperCase() !== "CASH") return s;
+    return s + getTradeNetAmount(o);
+  }, 0);
+  const netExternal = cashFlows.reduce((s, f) => {
+    const at = new Date(f.occurredAt);
+    if (at < CASH_RETURN_INITIAL_AT || at > new Date()) return s;
+    const k = f.kind.trim().toLowerCase();
+    if (k === "deposit" || k === "contribution") return s + f.amount;
+    if (k === "withdrawal") return s - f.amount;
+    return s;
+  }, 0);
+  return cashCostOfCapital - totalBuyFromCash + netExternal;
+}
 export default function WealthAllocationPage() {
   const [, navigate] = useLocation();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [snapshotRange, setSnapshotRange] = useState<SnapshotRange>("1m");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [holdingsCollapsed, setHoldingsCollapsed] = useState<boolean>(
     () => localStorage.getItem("wealth_holdings_collapsed") !== "0"
   );
   const [filterType, setFilterType] = useState<string>("all");
-  const [hideValues, setHideValues] = useState<boolean>(() => localStorage.getItem("hide_values") === "1");
   const [showQtyCol, setShowQtyCol] = useState<boolean>(() => localStorage.getItem("wealth_col_qty") === "1");
   const [showPriceCol, setShowPriceCol] = useState<boolean>(() => localStorage.getItem("wealth_col_price") === "1");
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [allocationHoldings, setAllocationHoldings] = useState<HoldingItem[]>([]);
   const [debt, setDebt] = useState<number>(0);
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [tradeOrders, setTradeOrders] = useState<TradeOrder[]>([]);
+  const [cashFlows, setCashFlows] = useState<CashFlow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,20 +54,22 @@ export default function WealthAllocationPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [wealthHoldings, summaryHoldings, totalAssetData, forecastTrades, latestSnapshot] = await Promise.all([
+      const [wealthHoldings, summaryHoldings, totalAssetData, forecastTrades, orders, flows] = await Promise.all([
         fetchWealthAllocationHoldings(),
         fetchWealthAllocationSummaryHoldings(),
         Promise.all([fetchForecastLoans(), fetchForecastLoanEvents()]),
         fetchForecastTrades(),
-        fetch("/api/wealth/snapshots/latest").then((r) => r.ok ? r.json() : null).catch(() => null),
+        fetch("/api/transactions").then((r) => r.ok ? r.json() : []).catch(() => []),
+        fetch("/api/portfolio/cash-flows").then((r) => r.ok ? r.json() : []).catch(() => []),
       ]);
       setHoldings(wealthHoldings);
       setAllocationHoldings(summaryHoldings);
+      setTradeOrders(orders as TradeOrder[]);
+      setCashFlows(flows as CashFlow[]);
       setDebt(getForecastDebtForYear(
         totalAssetData[0],
         buildForecastLoanEventsWithTradeSettlements(totalAssetData[0], totalAssetData[1], forecastTrades)
       ));
-      if (latestSnapshot) setLastSavedAt(latestSnapshot.snapshotAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load wealth allocation.");
     } finally {
@@ -107,6 +125,12 @@ export default function WealthAllocationPage() {
     [filterType, sortedHoldings]
   );
 
+  const cashAdjustedCost = useMemo(() => {
+    const cashHolding = holdings.find((h) => h.type.toLowerCase() === "cash");
+    if (!cashHolding || cashHolding.costOfCapital == null) return null;
+    return calcCashCostBasis(tradeOrders, cashHolding.costOfCapital, cashFlows);
+  }, [holdings, tradeOrders, cashFlows]);
+
   const filteredTotal = useMemo(
     () => filteredHoldings.reduce((sum, holding) => sum + (holding.currentValue ?? 0), 0),
     [filteredHoldings]
@@ -115,7 +139,7 @@ export default function WealthAllocationPage() {
   const chartData: ChartPoint[] = [];
 
   const formatMoney = (value: number | null | undefined, full = false) =>
-    hideValues ? "****" : full ? formatVNDFull(value) : formatVND(value);
+    full ? formatVNDFull(value) : formatVND(value);
 
   const sortLabel =
     sortOrder === "desc" ? "↓ High → Low" : sortOrder === "asc" ? "↑ Low → High" : "Sort";
@@ -132,12 +156,6 @@ export default function WealthAllocationPage() {
     const next = !holdingsCollapsed;
     setHoldingsCollapsed(next);
     localStorage.setItem("wealth_holdings_collapsed", next ? "1" : "0");
-  };
-
-  const toggleHideValues = () => {
-    const next = !hideValues;
-    setHideValues(next);
-    localStorage.setItem("hide_values", next ? "1" : "0");
   };
 
   const toggleQtyCol = () => {
@@ -175,34 +193,24 @@ export default function WealthAllocationPage() {
 
   const netAsset = totalValue - debt;
 
-  const saveSnapshotMutation = useMutation({
-    mutationFn: async () => {
-      const body = {
-        totalAsset: totalValue,
-        debt,
-        netAsset,
-        items: allocationHoldings.map((h) => ({
-          type: h.type,
-          label: h.symbol,
-          value: h.currentValue ?? 0,
-        })).filter((i) => i.value > 0),
-      };
-      const res = await fetch("/api/wealth/snapshots", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || "Unable to save snapshot.");
-      return data as { snapshotAt: string };
-    },
-    onSuccess: (data) => {
-      setLastSavedAt(data.snapshotAt);
-      void queryClient.invalidateQueries({ queryKey: ["wealth-snapshots"] });
-      toast({ title: "Đã lưu snapshot tài sản" });
-    },
-    onError: (err) => toast({ title: "Lỗi", description: err instanceof Error ? err.message : "", variant: "destructive" }),
-  });
+  const totalPnl = useMemo(() => {
+    return holdings.reduce((sum, h) => {
+      const isCash = h.type.toLowerCase() === "cash";
+      const cost = isCash
+        ? (cashAdjustedCost ?? h.costOfCapital ?? 0)
+        : (h.costBasisRemaining ?? h.costOfCapital ?? 0);
+      const unrealized = (h.currentValue ?? 0) - cost;
+      const realized = h.realizedPnl ?? (h as { interest?: number }).interest ?? 0;
+      return sum + unrealized + realized;
+    }, 0);
+  }, [holdings, cashAdjustedCost]);
+
+  const totalCost = useMemo(() => {
+    return holdings.reduce((sum, h) => {
+      const isCash = h.type.toLowerCase() === "cash";
+      return sum + (isCash ? (cashAdjustedCost ?? h.costOfCapital ?? 0) : (h.costBasisRemaining ?? h.costOfCapital ?? 0));
+    }, 0);
+  }, [holdings, cashAdjustedCost]);
 
   const handleOpenAssetType = (type: string) => {
     if (type === "financial") {
@@ -232,44 +240,35 @@ export default function WealthAllocationPage() {
         ) : (
           <>
             {/* ── Tổng quan tài sản ─────────────────────────────────── */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: "Tổng tài sản", value: totalValue, color: "text-foreground" },
-                { label: "Nợ", value: debt, color: debt > 0 ? "text-amber-400" : "text-muted-foreground" },
-                { label: "Tài sản ròng", value: netAsset, color: netAsset >= 0 ? "text-emerald-400" : "text-red-400" },
-              ].map((card) => (
-                <Card key={card.label} className="p-4 space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{card.label}</p>
-                  <p className={`text-sm sm:text-base md:text-lg font-bold tabular-nums break-all leading-snug ${card.color}`}>
-                    {formatMoney(card.value, true)}
-                  </p>
-                </Card>
-              ))}
-            </div>
+            <PortfolioSummaryCard
+              title="Tổng tài sản"
+              totalValueLabel={formatMoney(totalValue, true)}
+              hideValues={false}
+              onToggleHideValues={() => {}}
+              metrics={[
+                {
+                  label: "P/L",
+                  value: formatVNDFull(totalPnl),
+                  tone: totalPnl >= 0 ? "positive" : "negative",
+                },
+                {
+                  label: "P/L %",
+                  value: formatPercent(totalCost > 0 ? totalPnl / totalCost : null),
+                  tone: totalPnl >= 0 ? "positive" : "negative",
+                },
+                {
+                  label: "Nợ",
+                  value: formatVNDFull(debt),
+                  tone: debt > 0 ? "negative" : "neutral",
+                },
+                {
+                  label: "Tài sản ròng",
+                  value: formatVNDFull(netAsset),
+                  tone: netAsset >= 0 ? "positive" : "negative",
+                },
+              ]}
+            />
 
-            {/* ── Save + last saved ─────────────────────────────────── */}
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={toggleHideValues}
-                className="text-[10px] text-muted-foreground hover:text-foreground uppercase tracking-widest transition-colors"
-              >
-                {hideValues ? "Hiện số liệu" : "Ẩn số liệu"}
-              </button>
-              <p className="text-[10px] text-muted-foreground">
-                {lastSavedAt
-                  ? `Lần lưu cuối: ${new Date(lastSavedAt).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
-                  : "Chưa lưu snapshot nào"}
-              </p>
-              <Button
-                size="sm"
-                className="h-8 text-xs"
-                disabled={saveSnapshotMutation.isPending || totalValue === 0}
-                onClick={() => saveSnapshotMutation.mutate()}
-              >
-                {saveSnapshotMutation.isPending ? "Đang lưu..." : "Lưu snapshot"}
-              </Button>
-            </div>
 
             {(totalValue > 0 || holdings.length > 0) && (
               <div className="grid lg:grid-cols-2 gap-4">
@@ -284,7 +283,7 @@ export default function WealthAllocationPage() {
                   <PerformanceChart
                     title="Performance"
                     chartData={chartData}
-                    hideValues={hideValues}
+                    hideValues={false}
                     selectedRange={snapshotRange}
                     onRangeChange={setSnapshotRange}
                     emptyMessage="No wealth history yet."
@@ -305,6 +304,9 @@ export default function WealthAllocationPage() {
               holdingsCollapsed={holdingsCollapsed}
               showQtyCol={showQtyCol}
               showPriceCol={showPriceCol}
+              showCostOfCapitalCol
+              showReturnCols
+              cashAdjustedCost={cashAdjustedCost}
               formatMoney={formatMoney}
               onToggleHoldingsCollapsed={toggleHoldingsCollapsed}
               onToggleQtyCol={toggleQtyCol}

@@ -176,6 +176,9 @@ export default function HoldingsTable({
   const filteredPnLTotal = filteredHoldings.reduce((sum, holding) => {
     return sum + calculatePnL(holding, realizedPnLBySymbol, cashAdjustedCost).totalPnL;
   }, 0);
+  const filteredCostTotal = filteredHoldings.reduce((sum, holding) => {
+    return sum + (calculatePnL(holding, realizedPnLBySymbol, cashAdjustedCost).effectiveCostOfCapital ?? 0);
+  }, 0);
   const filteredUnrealizedPnLTotal = filteredHoldings.reduce((sum, holding) => {
     return sum + calculatePnL(holding, realizedPnLBySymbol, cashAdjustedCost).unrealizedPnL;
   }, 0);
@@ -580,7 +583,11 @@ export default function HoldingsTable({
                     </td>
                     {showQtyCol && <td className="px-2 pt-2.5" />}
                     {showPriceCol && <td className="px-2 pt-2.5" />}
-                    {showCostOfCapitalCol && <td className="px-2 pt-2.5" />}
+                    {showCostOfCapitalCol && (
+                      <td className="px-2 pt-2.5 text-sm font-bold text-right tabular-nums whitespace-nowrap text-muted-foreground">
+                        {formatVNDFull(filteredCostTotal)}
+                      </td>
+                    )}
                     {showReturnCols && (
                       <>
                       <td className={`px-2 pt-2.5 text-sm font-bold text-right tabular-nums whitespace-nowrap ${

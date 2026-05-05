@@ -223,6 +223,7 @@ function baseAssetToHolding(asset: BaseAsset): HoldingItem {
     change: null,
     changePercent: null,
     manualPrice: asset.baseValue,
+    costOfCapital: asset.baseValue,
   };
 }
 
