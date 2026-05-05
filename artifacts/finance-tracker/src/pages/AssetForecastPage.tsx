@@ -170,6 +170,9 @@ export default function AssetForecastPage() {
   const [tradeNote, setTradeNote] = useState("");
   const [incomeExpenseEditing, setIncomeExpenseEditing] = useState(false);
   const [incomeExpenseDraft, setIncomeExpenseDraft] = useState<Record<number, FreeCashRow>>({});
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftRef = useRef(incomeExpenseDraft);
+  draftRef.current = incomeExpenseDraft;
   const [loanEventLoanId, setLoanEventLoanId] = useState("");
   const [loanEventYear, setLoanEventYear] = useState("2026");
   const [loanEventType, setLoanEventType] = useState<ForecastLoanEvent["eventType"]>("principal_payment");
@@ -231,6 +234,7 @@ export default function AssetForecastPage() {
 
   const currentAssetRows = useMemo(() => currentAssetQuery.data ?? [], [currentAssetQuery.data]);
   const freeCashRows = useMemo(() => freeCashQuery.data ?? [], [freeCashQuery.data]);
+
   const forecastTrades = useMemo(() => forecastTradesQuery.data ?? [], [forecastTradesQuery.data]);
   const forecastLoans = useMemo(() => forecastLoansQuery.data ?? [], [forecastLoansQuery.data]);
   const forecastLoanEvents = useMemo(() => forecastLoanEventsQuery.data ?? [], [forecastLoanEventsQuery.data]);
@@ -873,29 +877,37 @@ export default function AssetForecastPage() {
     setIncomeExpenseEditing(true);
   };
 
-  const updateIncomeExpenseDraft = (year: number, key: keyof Pick<FreeCashRow, "income" | "otherIncome" | "expense" | "otherExpense" | "totalInterest">, value: string) => {
+  const buildRowsToSave = () =>
+    FORECAST_YEARS.map((year) => {
+      const draft = draftRef.current[year];
+      if (!draft) return null;
+      const interest = debtInterestByYear.get(year) ?? 0;
+      const computedExpense = Math.round((draft.income - interest) * 0.7);
+      return { ...draft, expense: computedExpense };
+    }).filter((row): row is FreeCashRow => Boolean(row));
+
+  const updateIncomeExpenseDraft = (year: number, key: keyof Pick<FreeCashRow, "otherIncome" | "otherExpense">, value: string) => {
     setIncomeExpenseDraft((current) => {
       const previous = current[year] ?? {
-        year,
-        income: 0,
-        otherIncome: 0,
-        expense: 0,
-        otherExpense: 0,
-        totalInterest: 0,
-        totalIncome: 0,
-        totalExpense: 0,
-        freeCash: 0,
+        year, income: 0, otherIncome: 0, expense: 0,
+        otherExpense: 0, totalInterest: 0, totalIncome: 0, totalExpense: 0, freeCash: 0,
       };
       const next = { ...previous, [key]: Math.abs(parseAmountInput(value)) };
       const totalIncome = next.income + next.otherIncome;
       const totalExpense = next.expense + next.otherExpense + next.totalInterest;
       return { ...current, [year]: { ...next, totalIncome, totalExpense, freeCash: totalIncome - totalExpense } };
     });
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      const rows = buildRowsToSave();
+      if (rows.length > 0) saveIncomeExpenseMutation.mutate(rows);
+    }, 800);
   };
 
   const saveIncomeExpenseDraft = () => {
-    const rows = FORECAST_YEARS.map((year) => incomeExpenseDraft[year]).filter((row): row is FreeCashRow => Boolean(row));
-    saveIncomeExpenseMutation.mutate(rows);
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    const rows = buildRowsToSave();
+    if (rows.length > 0) saveIncomeExpenseMutation.mutate(rows);
   };
 
   const submitLoanEvent = () => {
@@ -1032,6 +1044,9 @@ export default function AssetForecastPage() {
             </p>
             <div className="flex items-center gap-2">
               <p className="text-[10px] text-muted-foreground">2026-2044</p>
+              {saveIncomeExpenseMutation.isPending && (
+                <p className="text-[10px] text-muted-foreground animate-pulse">Đang lưu…</p>
+              )}
               {incomeExpenseEditing ? (
                 <>
                   <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setIncomeExpenseEditing(false)}>
@@ -1095,7 +1110,8 @@ export default function AssetForecastPage() {
                       const principalPayment = debtPrincipalPaymentByYear.get(year) ?? 0;
                       const loanInterest = debtInterestByYear.get(year) ?? 0;
                       const totalIncome = editRow.income + editRow.otherIncome;
-                      const totalExpense = editRow.expense + editRow.otherExpense + loanInterest;
+                      const computedExpense = Math.round((row.income - loanInterest) * 0.7);
+                      const totalExpense = computedExpense + editRow.otherExpense + loanInterest;
                       const freeCash = finalFreeCashByYear.get(year) ?? 0;
                       const inputClass = "h-8 w-32 ml-auto text-right text-xs tabular-nums";
                       return (
@@ -1108,7 +1124,7 @@ export default function AssetForecastPage() {
                             {incomeExpenseEditing ? <Input defaultValue={String(editRow.otherIncome)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "otherIncome", event.target.value)} /> : formatVNDFull(row.otherIncome)}
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
-                            {incomeExpenseEditing ? <Input defaultValue={String(editRow.expense)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "expense", event.target.value)} /> : formatVNDFull(row.expense)}
+                            <span className="text-muted-foreground">{formatVNDFull(computedExpense)}</span>
                           </td>
                           <td className="py-2 px-4 text-right tabular-nums whitespace-nowrap">
                             {incomeExpenseEditing ? <Input defaultValue={String(editRow.otherExpense)} inputMode="decimal" className={inputClass} onChange={(event) => updateIncomeExpenseDraft(year, "otherExpense", event.target.value)} /> : formatVNDFull(row.otherExpense)}

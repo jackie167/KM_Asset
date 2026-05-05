@@ -482,7 +482,7 @@ function calculateForecastCashValue(input: {
   return Math.max(0, Math.round(balance));
 }
 
-async function getPortfolioCurrentValueSnapshot() {
+export async function getPortfolioCurrentValueSnapshot() {
   const [
     holdings,
     latestPrices,

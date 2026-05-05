@@ -34,7 +34,7 @@ const HIGHLIGHT_ICON: Record<Highlight["type"], string> = {
 
 // ─── cache ────────────────────────────────────────────────────────────────────
 
-const ANALYSIS_KEY = "ai_analysis_v1";
+const ANALYSIS_KEY = "ai_analysis_v2";
 const CHAT_KEY     = "ai_chat_v1";
 type AnalysisCache = { analysis: AIAnalysis; ts: number };
 
@@ -276,7 +276,7 @@ export default function AIPanel() {
                         {analysis.risks.map((r, i) => (
                           <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
                             <span className="shrink-0 text-amber-400 mt-0.5">·</span>
-                            {r}
+                            {typeof r === "string" ? r : (r as { text?: string }).text ?? JSON.stringify(r)}
                           </li>
                         ))}
                       </ul>

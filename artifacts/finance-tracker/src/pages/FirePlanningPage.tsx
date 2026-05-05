@@ -280,7 +280,7 @@ export default function FirePlanningPage() {
 
   // Coast FIRE
   const yearsToTarget = Math.max(targetAge - currentAge, 0);
-  const coastFireNumber = fireNumber && yearsToTarget > 0
+  const coastFireNumber = fireNumber
     ? fireNumber / Math.pow(1 + r, yearsToTarget)
     : null;
   const isCoastFire = coastFireNumber != null && fireAssets >= coastFireNumber;

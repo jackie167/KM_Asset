@@ -69,6 +69,25 @@ export default function WealthAllocationPage() {
     [allocationHoldings]
   );
 
+  // Auto-save live total to DB whenever wealth page finishes loading
+  useEffect(() => {
+    if (isLoading || totalValue <= 0) return;
+    const financialAssets = allocationHoldings.find((h) => h.type === "financial")?.currentValue ?? 0;
+    fetch("/api/settings/portfolio_live_total", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        value: JSON.stringify({
+          total_assets: Math.round(totalValue),
+          financial_assets: Math.round(financialAssets),
+          debt: Math.round(debt),
+          net_worth: Math.round(totalValue - debt),
+          updated_at: new Date().toISOString(),
+        }),
+      }),
+    }).catch(() => {});
+  }, [isLoading, totalValue, debt, allocationHoldings]);
+
   const sortedHoldings = useMemo(() => {
     if (sortOrder === "none") return holdings;
     return [...holdings].sort((a, b) => {

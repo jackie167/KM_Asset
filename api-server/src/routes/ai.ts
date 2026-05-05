@@ -1,20 +1,17 @@
 import { Router, type IRouter } from "express";
 import Anthropic from "@anthropic-ai/sdk";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import {
   db,
   appSettingsTable,
   baseAssetsTable,
   expenseForecastTable,
-  holdingsTable,
   incomeExpenseTable,
-  wealthSnapshotsTable,
-  wealthSnapshotItemsTable,
   incomeSourcesTable,
   incomeProjectCalcTable,
   incomeForecastTable,
-  priceHistoryTable,
 } from "../../../lib/db/src/index.ts";
+import { buildAIContext } from "./aiContext.ts";
 import { YEAR_START, FORECAST_YEARS, CalcType, computeFCF } from "../lib/income-calc.ts";
 
 const router: IRouter = Router();
@@ -184,31 +181,18 @@ router.post("/ai/analyze", async (_req, res): Promise<void> => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) { res.status(503).json({ error: "ANTHROPIC_API_KEY chưa được cấu hình." }); return; }
 
-  const [expForecasts, baseAssets, incomeExp, allSettings, activeSources, calcEntries, forecastEntries] = await fetchAllData();
+  const context = await buildAIContext();
 
-  const settings = Object.fromEntries(allSettings.map((r) => [r.key, r.value ?? ""]));
-  const context = buildFinancialContext(expForecasts, baseAssets, incomeExp, allSettings, activeSources, calcEntries, forecastEntries);
+  const prompt = `Bạn là chuyên gia tài chính cá nhân. Phân tích toàn bộ tình hình tài chính dưới đây và trả về TIẾNG VIỆT.
+Đơn vị VND: 1 tỷ = 1.000.000.000; 1 triệu = 1.000.000. Khi mô tả số, quy đổi đúng và ghi rõ đơn vị (ví dụ: 900.183.673 = 900 triệu, KHÔNG phải 900 tỷ).
 
-  // Current year summary for the prompt
-  const curRow    = expForecasts.find((r) => r.year === CURRENT_YEAR);
-  const curIncome = num(curRow?.income) + num(curRow?.otherIncome);
-  const curInvest = curIncome * (num(curRow?.investmentRatio) / 100);
-  const curNeed   = num(curRow?.needLiving) + num(curRow?.needTuition) + num(curRow?.needAllowance) + num(curRow?.needMaintenance);
-  const curWant   = num(curRow?.wantBudget);
-  void settings;
+Dữ liệu tài chính:
+${JSON.stringify(context, null, 2)}
 
-  const prompt = `Bạn là chuyên gia tài chính cá nhân. Phân tích tài chính và trả về TIẾNG VIỆT.
+Yêu cầu — trả về JSON THUẦN (không markdown code block), đúng format sau:
+{"overview":"2-3 câu tổng quan","highlights":[{"type":"positive","text":"nhận xét kèm số liệu"}],"suggestions":[{"area":"lĩnh vực","current":"giá trị hiện tại","suggested":"đề xuất","reason":"lý do"}],"risks":["chuỗi mô tả rủi ro","chuỗi mô tả rủi ro 2"]}
 
-${context}
-
-## Năm ${CURRENT_YEAR} — tổng hợp
-Thu nhập: ${fmtB(curIncome)} | Đầu tư: ${fmtB(curInvest)} | Need: ${fmtB(curNeed)} | Want: ${fmtB(curWant)}
-
-## Yêu cầu
-Trả về JSON THUẦN (không markdown code block):
-{"overview":"2-3 câu tổng quan","highlights":[{"type":"positive|warning|negative","text":"ngắn gọn"}],"suggestions":[{"area":"lĩnh vực","current":"giá trị hiện tại","suggested":"đề xuất cụ thể","reason":"lý do"}],"risks":["rủi ro"]}
-
-Giới hạn: 4 highlights, 3 suggestions, 2 risks. Ngắn gọn, số liệu cụ thể.`;
+Lưu ý: risks là mảng STRING thuần, KHÔNG phải object. Giới hạn: 4 highlights, 3 suggestions, 2 risks.`;
 
   const client = new Anthropic({ apiKey });
   const message = await client.messages.create({
@@ -218,282 +202,20 @@ Giới hạn: 4 highlights, 3 suggestions, 2 risks. Ngắn gọn, số liệu c�
   });
 
   const rawText = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
-  const stripped = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  // Extract JSON: try code block first, then bare object
+  const codeBlock = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = codeBlock ? codeBlock[1]! : rawText;
+  const jsonMatch = candidate.match(/\{[\s\S]*\}/);
 
   let parsed: unknown = null;
-  try { parsed = JSON.parse(stripped); } catch {
-    try { const m = stripped.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); } catch { /* raw */ }
+  try { parsed = JSON.parse(candidate.trim()); } catch { /* continue */ }
+  if (!parsed && jsonMatch) {
+    try { parsed = JSON.parse(jsonMatch[0]); } catch { /* raw fallback */ }
   }
 
   res.json({ analysis: parsed ?? { overview: rawText, highlights: [], suggestions: [], risks: [] } });
 });
-
-// ─── Chat tools ───────────────────────────────────────────────────────────────
-
-const CHAT_TOOLS: Anthropic.Messages.Tool[] = [
-  {
-    name: "get_expense_forecast",
-    description: "Kế hoạch thu nhập, chi tiêu, đầu tư từng năm (Expense Forecast). Dùng khi hỏi về thu nhập kế hoạch, tỷ lệ đầu tư, chi tiêu need/want, số dư theo năm.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_income_forecast",
-    description: "Danh sách nguồn thu nhập và FCF từng năm (Income Forecast). Dùng khi hỏi về nguồn thu cụ thể, FCF dự án kinh doanh, dự báo thu nhập từng nguồn.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_assets",
-    description: "Tổng tài sản và chi tiết từng tài sản cơ bản (bất động sản, tiền mặt, đất...). Dùng khi hỏi về giá trị tài sản, phân loại tài sản cơ bản.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_holdings_snapshot",
-    description: "Danh mục đầu tư hiện tại (cổ phiếu, quỹ, crypto, vàng...) gồm giá trị thị trường, vốn, P/L. Dùng khi hỏi về danh mục đầu tư, lãi lỗ, tỷ trọng tài sản tài chính.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_fire_status",
-    description: "Mục tiêu và thông số FIRE (tỷ lệ rút, lãi suất kỳ vọng, tuổi mục tiêu, chi tiêu sau FIRE). Dùng khi hỏi về FIRE, tự do tài chính, bao lâu đạt FIRE.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_history",
-    description: "Lịch sử thu chi thực tế các năm trước. Dùng khi hỏi về lịch sử, xu hướng, so sánh kế hoạch với thực tế.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "get_wealth_snapshot",
-    description: "Snapshot tài sản ròng mới nhất: tổng tài sản, nợ, tài sản ròng và phân bổ theo từng loại (bất động sản, cổ phiếu, tiền mặt, vàng...). Dùng khi hỏi về tài sản hiện tại, phân bổ tài sản, tài sản ròng.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-];
-
-// ─── Tool implementations ──────────────────────────────────────────────────────
-
-async function toolGetExpenseForecast(): Promise<string> {
-  const rows = await db.select().from(expenseForecastTable).orderBy(asc(expenseForecastTable.year));
-  if (rows.length === 0) return "Chưa có dữ liệu Expense Forecast.";
-  const lines = rows.map((r) => {
-    const income      = num(r.income) + num(r.otherIncome);
-    const investRatio = num(r.investmentRatio);
-    const invest      = income * (investRatio / 100);
-    const needTotal   = num(r.needLiving) + num(r.needTuition) + num(r.needAllowance) + num(r.needMaintenance);
-    const want        = num(r.wantBudget);
-    const balance     = income - invest - needTotal - want;
-    const aN = r.actualNeed != null ? num(r.actualNeed) : null;
-    const aW = r.actualWant != null ? num(r.actualWant) : null;
-    const actual = (aN != null || aW != null)
-      ? ` | thực tế need=${aN != null ? fmtB(aN) : "—"} want=${aW != null ? fmtB(aW) : "—"}`
-      : "";
-    return `${r.year}: thu ${fmtB(income)}, đầu tư ${investRatio.toFixed(0)}%(${fmtB(invest)}), need ${fmtB(needTotal)}, want ${fmtB(want)}, số dư ${fmtB(balance)}${actual}`;
-  });
-  return `Expense Forecast (${rows.length} năm):\n${lines.join("\n")}`;
-}
-
-async function toolGetIncomeForecast(): Promise<string> {
-  const [sources, forecastEntries, calcEntries] = await Promise.all([
-    db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.active, true)),
-    db.select().from(incomeForecastTable).orderBy(asc(incomeForecastTable.year)),
-    db.select().from(incomeProjectCalcTable),
-  ]);
-  if (sources.length === 0) return "Chưa có nguồn thu nhập.";
-
-  const fcBySource: Record<number, Record<number, number>> = {};
-  for (const e of forecastEntries) {
-    fcBySource[e.sourceId] ??= {};
-    fcBySource[e.sourceId]![e.year] = num(e.amount);
-  }
-
-  const calcBySource: Record<number, typeof calcEntries> = {};
-  for (const e of calcEntries) { calcBySource[e.sourceId] ??= []; calcBySource[e.sourceId]!.push(e); }
-
-  const lines = sources.map((src) => {
-    if (src.type === "business") {
-      const rows = calcBySource[src.id] ?? [];
-      let calcType: CalcType = "direct";
-      const vals: Record<string, Record<number, number>> = {};
-      for (const e of rows) {
-        if (e.rowId === "_calc_type") { calcType = num(e.value) === 1 ? "per_ha" : "direct"; continue; }
-        vals[e.rowId] ??= {};
-        vals[e.rowId]![e.year] = num(e.value);
-      }
-      const fcfYears = FORECAST_YEARS.map((year) => {
-        const inp: Record<string, number> = {};
-        for (const [rowId, ym] of Object.entries(vals)) inp[rowId] = ym[year] ?? 0;
-        return { year, fcf: computeFCF(inp, calcType) };
-      }).filter((x) => x.fcf !== 0).map((x) => `${x.year}:${fmtB(x.fcf)}`).join(", ");
-      return `- ${src.name} [kinh doanh]: FCF ${fcfYears || "chưa nhập"}`;
-    }
-    if (src.forecastMode === "growth" && num(src.forecastBase) > 0) {
-      const base = num(src.forecastBase);
-      const rate = num(src.forecastRate);
-      const sample = FORECAST_YEARS.slice(0, 5).map((y) => `${y}:${fmtB(base * Math.pow(1 + rate / 100, y - YEAR_START))}`).join(", ");
-      return `- ${src.name} [${src.type}, tăng ${rate}%/năm]: ${sample}…`;
-    }
-    const stored = fcBySource[src.id] ?? {};
-    const byYear = FORECAST_YEARS.filter((y) => stored[y]).map((y) => `${y}:${fmtB(stored[y]!)}`).join(", ");
-    return `- ${src.name} [${src.type}]: ${byYear || "chưa nhập"}`;
-  });
-  return `Nguồn thu nhập (${sources.length} nguồn):\n${lines.join("\n")}`;
-}
-
-async function toolGetAssets(): Promise<string> {
-  const rows = await db.select().from(baseAssetsTable);
-  if (rows.length === 0) return "Chưa có dữ liệu tài sản cơ bản.";
-  const total = rows.reduce((s, a) => s + num(a.baseValue), 0);
-  const lines = rows.map((a) =>
-    `- ${a.symbol} (${a.assetType}): ${fmtB(num(a.baseValue))} (${((num(a.baseValue) / total) * 100).toFixed(1)}%)`
-  );
-  return `Tài sản cơ bản — tổng ${fmtB(total)}:\n${lines.join("\n")}`;
-}
-
-async function toolGetHoldingsSnapshot(): Promise<string> {
-  const [holdings, latestPrices] = await Promise.all([
-    db.select().from(holdingsTable),
-    // priceOrValue = per-unit price (NOT currentValue which is total)
-    db.selectDistinctOn([priceHistoryTable.assetCode], {
-      assetCode: priceHistoryTable.assetCode,
-      priceOrValue: priceHistoryTable.priceOrValue,
-    })
-      .from(priceHistoryTable)
-      .orderBy(priceHistoryTable.assetCode, desc(priceHistoryTable.priceAt)),
-  ]);
-
-  if (holdings.length === 0) return "Chưa có dữ liệu danh mục đầu tư.";
-
-  // per-unit price from price_history (priceOrValue only — currentValue is the total, not per-unit)
-  const unitPriceFromHistory = new Map<string, number>();
-  for (const p of latestPrices) {
-    const price = num(p.priceOrValue);
-    if (price > 0) unitPriceFromHistory.set(p.assetCode.toUpperCase(), price);
-  }
-
-  // Mirror the actual holdings route:
-  // - stock/gold/crypto: currentValue = qty × unitPrice (manualPrice or latest priceOrValue)
-  // - fund/cash/real_estate/…: currentValue = manualPrice (already total portfolio value)
-  const NON_MANUAL = new Set(["stock", "gold", "crypto"]);
-  const isNonManual = (t: string) => NON_MANUAL.has(t.trim().toLowerCase());
-
-  let totalValue = 0;
-  let totalCost  = 0;
-  const lines: string[] = [];
-
-  for (const h of holdings) {
-    const qty      = num(h.quantity);
-    const manual   = num(h.manualPrice);
-    const cost     = num(h.costOfCapital);
-    const interest = num(h.interest);
-
-    const unitPrice = isNonManual(h.type)
-      ? (unitPriceFromHistory.get(h.symbol.toUpperCase()) || manual)
-      : 0;
-    const currentValue = isNonManual(h.type) ? qty * unitPrice : manual;
-
-    const unrealized = cost > 0 && currentValue > 0 ? currentValue - cost : null;
-    const totalPnL   = unrealized != null ? unrealized + interest : interest > 0 ? interest : null;
-
-    totalValue += currentValue;
-    totalCost  += cost;
-
-    const detail = isNonManual(h.type) ? ` (${qty} × ${fmtB(unitPrice)})` : "";
-    const pnlStr = totalPnL != null ? ` | P/L ${totalPnL >= 0 ? "+" : ""}${fmtB(totalPnL)}` : "";
-    lines.push(`- ${h.symbol} (${h.type})${detail}: ${fmtB(currentValue)}, vốn ${fmtB(cost)}${pnlStr}`);
-  }
-
-  const totalPnL = totalValue - totalCost;
-  return [
-    `Danh mục đầu tư — ${holdings.length} tài sản`,
-    `Tổng giá trị: ${fmtB(totalValue)} | Vốn: ${fmtB(totalCost)} | P/L: ${totalPnL >= 0 ? "+" : ""}${fmtB(totalPnL)}`,
-    "",
-    ...lines,
-  ].join("\n");
-}
-
-async function toolGetFireStatus(): Promise<string> {
-  const allSettings = await db.select().from(appSettingsTable);
-  const s = Object.fromEntries(allSettings.map((r) => [r.key, r.value ?? ""]));
-  const fireWR        = num(s["fire_wr"]) || 4;
-  const fireRet       = num(s["fire_ret"]) || 8;
-  const fireAge       = num(s["fire_age"]) || 0;
-  const fireTargetAge = num(s["fire_target_age"]) || 0;
-  const fireSpend     = num(s["fire_spend"]) || 0;
-  const fireMode      = s["fire_asset_mode"] || "investment";
-  const fireTarget    = fireWR > 0 ? (fireSpend * 12) / (fireWR / 100) : 0;
-  const yearsToFire   = fireTargetAge > 0 && fireAge > 0 ? Math.max(0, fireTargetAge - fireAge) : 0;
-  return [
-    `FIRE Settings:`,
-    `Mục tiêu tài sản: ${fireTarget > 0 ? fmtB(fireTarget) : "Chưa đặt"}`,
-    `Chi tiêu/tháng sau FIRE: ${fireSpend > 0 ? fmtB(fireSpend) : "Chưa đặt"}`,
-    `Tỷ lệ rút (WR): ${fireWR}% | Lãi suất kỳ vọng: ${fireRet}%`,
-    `Tuổi hiện tại: ${fireAge || "Chưa đặt"} | Tuổi FIRE mục tiêu: ${fireTargetAge || "Chưa đặt"}`,
-    yearsToFire > 0 ? `Còn ${yearsToFire} năm đến FIRE` : "",
-    `Chế độ: ${fireMode === "investment" ? "Tài sản đầu tư" : "Tổng tài sản ròng"}`,
-  ].filter(Boolean).join("\n");
-}
-
-async function toolGetWealthSnapshot(): Promise<string> {
-  const snapshot = await db
-    .select()
-    .from(wealthSnapshotsTable)
-    .orderBy(desc(wealthSnapshotsTable.snapshotAt))
-    .limit(1);
-
-  if (snapshot.length === 0) return "Chưa có dữ liệu wealth snapshot.";
-
-  const snap = snapshot[0]!;
-  const items = await db
-    .select()
-    .from(wealthSnapshotItemsTable)
-    .where(eq(wealthSnapshotItemsTable.snapshotId, snap.id));
-
-  const date = snap.snapshotAt.toLocaleDateString("vi-VN");
-  const breakdown = items
-    .sort((a, b) => num(b.value) - num(a.value))
-    .map((item) => {
-      const pct = num(snap.totalAsset) > 0
-        ? ` (${((num(item.value) / num(snap.totalAsset)) * 100).toFixed(1)}%)`
-        : "";
-      return `- ${item.label ?? item.type}: ${fmtB(num(item.value))}${pct}`;
-    })
-    .join("\n");
-
-  return [
-    `Wealth Snapshot (${date}):`,
-    `Tổng tài sản: ${fmtB(num(snap.totalAsset))}`,
-    `Nợ: ${fmtB(num(snap.debt))}`,
-    `Tài sản ròng: ${fmtB(num(snap.netAsset))}`,
-    "",
-    "Phân bổ theo loại:",
-    breakdown || "(không có chi tiết)",
-  ].join("\n");
-}
-
-async function toolGetHistory(): Promise<string> {
-  const rows = await db.select().from(incomeExpenseTable).orderBy(asc(incomeExpenseTable.year));
-  if (rows.length === 0) return "Chưa có dữ liệu lịch sử.";
-  const lines = rows.map((r) => {
-    const inc = num(r.income) + num(r.otherIncome);
-    const exp = num(r.expense) + num(r.otherExpense);
-    const savingsPct = inc > 0 ? (((inc - exp) / inc) * 100).toFixed(0) : "—";
-    return `${r.year}: thu ${fmtB(inc)}, chi ${fmtB(exp)}, tiết kiệm ${savingsPct}%`;
-  });
-  return `Lịch sử thu chi thực tế:\n${lines.join("\n")}`;
-}
-
-async function executeTool(name: string): Promise<string> {
-  switch (name) {
-    case "get_expense_forecast":   return toolGetExpenseForecast();
-    case "get_income_forecast":    return toolGetIncomeForecast();
-    case "get_assets":             return toolGetAssets();
-    case "get_holdings_snapshot":  return toolGetHoldingsSnapshot();
-    case "get_fire_status":        return toolGetFireStatus();
-    case "get_history":            return toolGetHistory();
-    case "get_wealth_snapshot":    return toolGetWealthSnapshot();
-    default: return `Tool "${name}" không tồn tại.`;
-  }
-}
-
-// ─── POST /ai/chat ────────────────────────────────────────────────────────────
 
 router.post("/ai/chat", async (req, res): Promise<void> => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -512,54 +234,21 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     .map((m) => ({ role: m.role, content: m.content }));
 
   const client = new Anthropic({ apiKey });
+  const context = await buildAIContext();
 
-  const systemPrompt = `Bạn là trợ lý tài chính cá nhân. Sử dụng các tool để lấy đúng dữ liệu cần thiết trước khi trả lời — không đoán mò số liệu.
-Nguyên tắc: chỉ đọc dữ liệu, KHÔNG đề xuất thao tác hệ thống. Trả lời bằng TIẾNG VIỆT, ngắn gọn, kèm số liệu cụ thể. Tính toán thì trình bày từng bước.`;
+  const systemPrompt = `Bạn là trợ lý tài chính cá nhân. Dữ liệu tài chính cập nhật bên dưới là nguồn duy nhất — không đoán mò số liệu.
+Nguyên tắc: chỉ đọc dữ liệu, KHÔNG đề xuất thao tác hệ thống. Trả lời bằng TIẾNG VIỆT, ngắn gọn, kèm số liệu cụ thể. Tính toán thì trình bày từng bước.
+Đơn vị tiền VND: 1 tỷ = 1.000.000.000; 1 triệu = 1.000.000. Khi đọc số nguyên từ dữ liệu, quy đổi đúng: ví dụ 900.183.673 = 900 TRIỆU (không phải 900 tỷ); 6.134.067.650 = 6,13 tỷ. LUÔN ghi rõ đơn vị (tỷ hoặc triệu) để tránh nhầm lẫn.
+Nếu data_quality.issues_count > 0, hãy note cho user về dữ liệu có thể chưa cập nhật.
 
-  // Agentic loop: Claude gọi tool → server thực thi → Claude nhận kết quả → lặp cho đến khi có câu trả lời
-  const messages: Anthropic.Messages.MessageParam[] = [
-    ...historyMsgs,
-    { role: "user", content: userMessage },
-  ];
+${JSON.stringify(context, null, 2)}`;
 
-  let response = await client.messages.create({
+  const response = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 1024,
     system: systemPrompt,
-    tools: CHAT_TOOLS,
-    messages,
+    messages: [...historyMsgs, { role: "user", content: userMessage }],
   });
-
-  let iterations = 0;
-  while (response.stop_reason === "tool_use" && iterations < 5) {
-    iterations++;
-    const toolUseBlocks = response.content.filter(
-      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
-    );
-
-    // Execute all requested tools in parallel
-    const toolResults = await Promise.all(
-      toolUseBlocks.map(async (block) => {
-        const result = await executeTool(block.name);
-        return {
-          type: "tool_result" as const,
-          tool_use_id: block.id,
-          content: result,
-        };
-      })
-    );
-
-    messages.push({ role: "assistant", content: response.content });
-    messages.push({ role: "user", content: toolResults });
-
-    response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      system: systemPrompt,
-      tools: CHAT_TOOLS,
-      messages,
-    });
-  }
 
   const text = response.content.find((b) => b.type === "text")
     ? (response.content.find((b) => b.type === "text") as Anthropic.Messages.TextBlock).text.trim()

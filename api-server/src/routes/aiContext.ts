@@ -2,10 +2,10 @@ import { Router, type IRouter } from "express";
 import { asc, desc, eq } from "drizzle-orm";
 import {
   db,
-  holdingsTable,
   baseAssetsTable,
   priceHistoryTable,
   forecastLoansTable,
+  forecastLoanEventsTable,
   appSettingsTable,
   incomeExpenseTable,
   incomeSourcesTable,
@@ -13,6 +13,7 @@ import {
   incomeProjectCalcTable,
 } from "../../../lib/db/src/index.ts";
 import { FORECAST_YEARS, computeIncomeTotals } from "../lib/income-calc.ts";
+import { getPortfolioCurrentValueSnapshot } from "./holdings.ts";
 
 const router: IRouter = Router();
 
@@ -29,12 +30,12 @@ const isNonManual  = (t: string) => NON_MANUAL_TYPES.has(norm(t));
 const STALE_DAYS   = 7;
 const msPerDay     = 86_400_000;
 
-router.get("/ai/context", async (_req, res): Promise<void> => {
+export async function buildAIContext() {
   const now = new Date();
 
-  const [holdings, baseAssets, latestPrices, loans, allSettings, ieRows, sources, forecastEntries, calcEntries] =
+  const [portfolioSnapshot, baseAssets, latestPrices, loans, loanEvents, allSettings, ieRows, sources, forecastEntries, calcEntries] =
     await Promise.all([
-      db.select().from(holdingsTable),
+      getPortfolioCurrentValueSnapshot(),
       db.select().from(baseAssetsTable),
       db.selectDistinctOn([priceHistoryTable.assetCode], {
         assetCode: priceHistoryTable.assetCode,
@@ -42,6 +43,7 @@ router.get("/ai/context", async (_req, res): Promise<void> => {
         priceAt: priceHistoryTable.priceAt,
       }).from(priceHistoryTable).orderBy(priceHistoryTable.assetCode, desc(priceHistoryTable.priceAt)),
       db.select().from(forecastLoansTable),
+      db.select().from(forecastLoanEventsTable),
       db.select().from(appSettingsTable),
       db.select().from(incomeExpenseTable).orderBy(asc(incomeExpenseTable.year)),
       db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.active, true)),
@@ -50,48 +52,68 @@ router.get("/ai/context", async (_req, res): Promise<void> => {
     ]);
 
   const settings = Object.fromEntries(allSettings.map((r) => [r.key, r.value ?? ""]));
+  const { holdingsWithValue } = portfolioSnapshot;
 
-  // ── Price map (per-unit price from price_history) ──────────────────────────
-  const priceMap = new Map<string, { price: number; priceAt: Date }>();
-  for (const p of latestPrices) {
-    priceMap.set(p.assetCode.toUpperCase(), {
-      price: num(p.priceOrValue),
-      priceAt: p.priceAt,
-    });
+  // ── Totals from portfolio snapshot (same formula as Investment page) ────────
+  const totalFinancial = holdingsWithValue
+    .filter((h) => isFinancial(h.type))
+    .reduce((s, h) => s + (h.currentValue ?? 0), 0);
+  const totalNonCash = holdingsWithValue
+    .filter((h) => isFinancial(h.type) && norm(h.type) !== "cash")
+    .reduce((s, h) => s + (h.currentValue ?? 0), 0);
+  // Exclude financial snapshots and assets already tracked in holdingsWithValue (avoid double-count)
+  const FINANCIAL_BASE_TYPES = new Set(["cash", "stock", "gold", "fund", "crypto", "financial"]);
+  const nk = (s: string) => s.normalize("NFC").toUpperCase().trim();
+  const holdingKeys = new Set(holdingsWithValue.map(h => `${norm(h.type)}::${nk(h.symbol)}`));
+  const uniqueBaseAssets = baseAssets.filter(a =>
+    !FINANCIAL_BASE_TYPES.has(norm(a.assetType)) &&
+    !holdingKeys.has(`${norm(a.assetType)}::${nk(a.symbol)}`)
+  );
+  const totalBaseAssets = uniqueBaseAssets.reduce((s, a) => s + num(a.baseValue), 0);
+
+  // Use total_assets saved by WealthAllocationPage (includes growth rates + forecast trades).
+  // Fall back to raw sum if not yet saved.
+  let liveTotalAssets = 0;
+  try {
+    const raw = settings["portfolio_live_total"];
+    if (raw) liveTotalAssets = (JSON.parse(raw) as { total_assets?: number }).total_assets ?? 0;
+  } catch { /* ignore */ }
+  const totalAssets = liveTotalAssets > 0 ? liveTotalAssets : totalFinancial + totalBaseAssets;
+
+  const activeLoans = loans.filter((l) => l.status === "active");
+
+  // Compute remaining principal using same schedule logic as frontend getForecastDebtForYear()
+  const currentYear = now.getFullYear();
+  const eventsByLoanYear = new Map<string, typeof loanEvents>();
+  for (const e of loanEvents) {
+    const k = `${e.loanId}::${e.year}`;
+    eventsByLoanYear.set(k, [...(eventsByLoanYear.get(k) ?? []), e]);
   }
+  const loanState = new Map(activeLoans.map((l) => [l.id, num(l.principalStart)]));
+  for (const year of Array.from({ length: currentYear - 2025 }, (_, i) => 2026 + i)) {
+    for (const loan of activeLoans) {
+      const starts = year >= loan.startYear;
+      const ended = loan.endYear != null && year > loan.endYear;
+      if (!starts || ended) continue;
+      const startP = loanState.get(loan.id) ?? 0;
+      const evts = eventsByLoanYear.get(`${loan.id}::${year}`) ?? [];
+      const evtDrawdown   = evts.filter((e) => e.eventType === "drawdown").reduce((s, e) => s + num(e.amount), 0);
+      const evtPrincipal  = evts.filter((e) => e.eventType === "principal_payment").reduce((s, e) => s + num(e.amount), 0);
+      const evtSettlement = evts.filter((e) => e.eventType === "settlement").reduce((s, e) => s + num(e.amount), 0);
+      const scheduled     = loan.repaymentType === "custom" ? 0 : num(loan.annualPrincipalPayment);
+      const paid = Math.min(Math.max(0, startP + evtDrawdown), scheduled + evtPrincipal + evtSettlement);
+      loanState.set(loan.id, Math.max(0, startP + evtDrawdown - paid));
+    }
+  }
+  const totalLoan = activeLoans.reduce((s, l) => s + (loanState.get(l.id) ?? 0), 0);
 
-  // ── Holdings with computed current value ───────────────────────────────────
-  const holdingsCalc = holdings.map((h) => {
-    const qty      = num(h.quantity);
-    const manual   = num(h.manualPrice);
-    const cost     = num(h.costOfCapital);
-    const realized = num(h.interest);
-    const ph       = priceMap.get(h.symbol.toUpperCase());
-
-    const unitPrice    = isNonManual(h.type) ? (ph?.price || manual) : manual;
-    const currentValue = isNonManual(h.type) ? qty * unitPrice : manual;
-    const unrealized   = cost > 0 && currentValue > 0 ? currentValue - cost : 0;
-    const totalPnl     = unrealized + realized;
-
-    const daysOld      = ph ? Math.floor((now.getTime() - ph.priceAt.getTime()) / msPerDay) : null;
-    const priceSource  = isNonManual(h.type)
-      ? (ph ? `price_history (${daysOld}d ago)` : "manual_fallback")
-      : "manual";
-
-    return { h, currentValue, cost, realized, unrealized, totalPnl, priceSource, daysOld, unitPrice };
-  });
-
-  // ── Totals ─────────────────────────────────────────────────────────────────
-  const totalFinancial   = holdingsCalc.filter((x) => isFinancial(x.h.type)).reduce((s, x) => s + x.currentValue, 0);
-  const totalNonCash     = holdingsCalc.filter((x) => isFinancial(x.h.type) && norm(x.h.type) !== "cash").reduce((s, x) => s + x.currentValue, 0);
-  const totalBaseAssets  = baseAssets.reduce((s, a) => s + num(a.baseValue), 0);
-  const totalAssets      = totalFinancial + totalBaseAssets;
-
-  const activeLoans      = loans.filter((l) => l.status === "active");
-  const totalLoan        = activeLoans.reduce((s, l) => s + num(l.principalStart), 0);
-  const annualInterest   = activeLoans.reduce((s, l) => s + num(l.annualInterestPayment), 0);
-  const netWorth         = totalAssets - totalLoan;
-  const totalPnl         = holdingsCalc.reduce((s, x) => s + x.totalPnl, 0);
+  // Annual interest based on current remaining principal
+  const annualInterest = activeLoans.reduce((s, l) => {
+    const remaining = loanState.get(l.id) ?? 0;
+    return s + (num(l.annualInterestPayment) || remaining * num(l.interestRate));
+  }, 0);
+  const netWorth       = totalAssets - totalLoan;
+  const totalPnl       = holdingsWithValue.reduce((s, h) => s + (h.totalPnl ?? 0), 0);
 
   // ── Allocation targets from app_settings ──────────────────────────────────
   let allocTargets: Record<string, number> = {};
@@ -108,114 +130,122 @@ router.get("/ai/context", async (_req, res): Promise<void> => {
     total_investment:         Math.round(totalNonCash),
     investment_percent_total: totalAssets > 0 ? +((totalNonCash / totalAssets) * 100).toFixed(2) : 0,
     total_pnl:                Math.round(totalPnl),
-    xirr:                     null, // compute separately — expensive
+    xirr:                     null,
     updated_at:               now.toISOString(),
   };
 
   // ── current_allocation ────────────────────────────────────────────────────
   const allocByType = new Map<string, number>();
-  for (const { h, currentValue } of holdingsCalc) {
+  for (const h of holdingsWithValue) {
     if (!isFinancial(h.type)) continue;
     const t = norm(h.type);
-    allocByType.set(t, (allocByType.get(t) ?? 0) + currentValue);
+    allocByType.set(t, (allocByType.get(t) ?? 0) + (h.currentValue ?? 0));
   }
-  // Include base_assets as a category
   if (totalBaseAssets > 0) allocByType.set("base_assets", totalBaseAssets);
 
   const current_allocation = [...allocByType.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([assetClass, value]) => {
-      const pctTotal   = totalAssets > 0 ? +((value / totalAssets) * 100).toFixed(2) : 0;
-      const pctFin     = totalFinancial > 0 && assetClass !== "base_assets"
+      const pctTotal = totalAssets > 0 ? +((value / totalAssets) * 100).toFixed(2) : 0;
+      const pctFin   = totalFinancial > 0 && assetClass !== "base_assets"
         ? +((value / totalFinancial) * 100).toFixed(2) : null;
-      const target     = allocTargets[assetClass] ?? null;
-      let status: string = "no_target";
+      const target   = allocTargets[assetClass] ?? null;
+      let status = "no_target";
       if (target != null && pctFin != null) {
         status = pctFin < target * 0.7 ? "low" : pctFin > target * 1.3 ? "high" : "ok";
       }
       return { asset_class: assetClass, current_value: Math.round(value), percent_total_assets: pctTotal, percent_in_financial: pctFin, target_pct: target, status };
     });
 
-  // ── current_holdings ─────────────────────────────────────────────────────
-  const current_holdings = holdingsCalc.map(({ h, currentValue, cost, realized, unrealized, totalPnl, priceSource }) => ({
-    asset_code:          h.symbol,
-    asset_class:         h.type,
-    group:               h.investmentGroup || (isFinancial(h.type) ? "financial" : "real_estate"),
-    current_value:       Math.round(currentValue),
-    cost_basis:          Math.round(cost),
-    realized_pnl:        Math.round(realized),
-    unrealized_pnl:      Math.round(unrealized),
-    total_pnl:           Math.round(totalPnl),
+  // ── current_holdings (from portfolio snapshot — same values as Investment page) ─
+  const current_holdings = holdingsWithValue.map((h) => ({
+    asset_code:           h.symbol,
+    asset_class:          h.type,
+    group:                h.investmentGroup || (isFinancial(h.type) ? "financial" : "real_estate"),
+    current_value:        Math.round(h.currentValue ?? 0),
+    cost_basis:           Math.round(h.costOfCapital ?? 0),
+    realized_pnl:         Math.round(h.realizedPnl ?? 0),
+    unrealized_pnl:       Math.round(h.unrealizedPnl ?? 0),
+    total_pnl:            Math.round(h.totalPnl ?? 0),
     percent_in_financial: totalFinancial > 0 && isFinancial(h.type)
-      ? +((currentValue / totalFinancial) * 100).toFixed(2) : null,
-    percent_total_assets: totalAssets > 0 ? +((currentValue / totalAssets) * 100).toFixed(2) : 0,
-    price_source:        priceSource,
-    updated_at:          h.updatedAt.toISOString(),
+      ? +((( h.currentValue ?? 0) / totalFinancial) * 100).toFixed(2) : null,
+    percent_total_assets: totalAssets > 0 ? +(((h.currentValue ?? 0) / totalAssets) * 100).toFixed(2) : 0,
+    price_source:         "portfolio_summary",
   }));
 
-  // Add base_assets as individual items
-  const base_assets_detail = baseAssets.map((a) => ({
-    asset_code:          a.symbol,
-    asset_class:         a.assetType,
-    group:               "base_assets",
-    current_value:       Math.round(num(a.baseValue)),
-    cost_basis:          Math.round(num(a.baseValue)),
-    realized_pnl:        0,
-    unrealized_pnl:      0,
-    total_pnl:           0,
+  // Add base_assets as individual items — only unique non-financial ones not already in holdingsWithValue
+  const base_assets_detail = uniqueBaseAssets.map((a) => ({
+    asset_code:           a.symbol,
+    asset_class:          a.assetType,
+    group:                "base_assets",
+    current_value:        Math.round(num(a.baseValue)),
+    cost_basis:           Math.round(num(a.baseValue)),
+    realized_pnl:         0,
+    unrealized_pnl:       0,
+    total_pnl:            0,
     percent_in_financial: null,
     percent_total_assets: totalAssets > 0 ? +((num(a.baseValue) / totalAssets) * 100).toFixed(2) : 0,
-    price_source:        `base_year_${a.baseYear}`,
-    updated_at:          a.updatedAt.toISOString(),
+    price_source:         `base_year_${a.baseYear}`,
+    updated_at:           a.updatedAt.toISOString(),
   }));
 
   // ── loans_summary ─────────────────────────────────────────────────────────
-  // Current year income for interest burden calculation
   const curYearIncome = num(ieRows.find((r) => r.year === now.getFullYear())?.income);
   const incomeTotals  = computeIncomeTotals(sources, forecastEntries, calcEntries);
   const curIncome     = (incomeTotals[now.getFullYear()] ?? 0) || curYearIncome;
 
   const loans_summary = {
-    total_loan:           Math.round(totalLoan),
-    loan_count:           activeLoans.length,
-    monthly_interest:     Math.round(annualInterest / 12),
-    annual_interest:      Math.round(annualInterest),
-    debt_to_asset_ratio:  totalAssets > 0 ? +((totalLoan / totalAssets) * 100).toFixed(2) : 0,
-    interest_burden_pct:  curIncome > 0 ? +((annualInterest / curIncome) * 100).toFixed(2) : null,
+    total_loan:          Math.round(totalLoan),
+    loan_count:          activeLoans.length,
+    monthly_interest:    Math.round(annualInterest / 12),
+    annual_interest:     Math.round(annualInterest),
+    debt_to_asset_ratio: totalAssets > 0 ? +((totalLoan / totalAssets) * 100).toFixed(2) : 0,
+    interest_burden_pct: curIncome > 0 ? +((annualInterest / curIncome) * 100).toFixed(2) : null,
     loans: activeLoans.map((l) => ({
-      name:             l.loanName,
-      asset:            `${l.assetType}/${l.assetSymbol}`,
-      principal:        Math.round(num(l.principalStart)),
-      annual_interest:  Math.round(num(l.annualInterestPayment)),
-      rate_pct:         +((num(l.interestRate)) * 100).toFixed(2),
+      name:            l.loanName,
+      asset:           `${l.assetType}/${l.assetSymbol}`,
+      principal:       Math.round(num(l.principalStart)),
+      annual_interest: Math.round(num(l.annualInterestPayment)),
+      rate_pct:        +((num(l.interestRate)) * 100).toFixed(2),
     })),
   };
 
   // ── cashflow_summary ──────────────────────────────────────────────────────
   const ieByYear = new Map(ieRows.map((r) => [r.year, r]));
   const cashflow_summary = FORECAST_YEARS.map((year) => {
-    const row      = ieByYear.get(year);
-    const income   = incomeTotals[year] ?? num(row?.income);
-    const expense  = row ? num(row.expense) + num(row.otherExpense) + num(row.totalInterest) : 0;
+    const row     = ieByYear.get(year);
+    const income  = incomeTotals[year] ?? num(row?.income);
+    const expense = row ? num(row.expense) + num(row.otherExpense) + num(row.totalInterest) : 0;
     return {
       year,
-      income:       Math.round(income),
-      expense:      Math.round(expense),
-      net_saving:   Math.round(income - expense),
-      ending_cash:  row ? Math.round(income - expense) : null, // simplified; full free cash from asset forecast page
+      income:      Math.round(income),
+      expense:     Math.round(expense),
+      net_saving:  Math.round(income - expense),
+      ending_cash: row ? Math.round(income - expense) : null,
     };
   }).filter((r) => r.income > 0 || r.expense > 0);
 
   // ── data_quality ──────────────────────────────────────────────────────────
-  const missingPrices = holdingsCalc
-    .filter(({ h, currentValue }) => isNonManual(h.type) && currentValue === 0)
-    .map(({ h }) => h.symbol);
+  const priceMap = new Map<string, { priceAt: Date }>();
+  for (const p of latestPrices) priceMap.set(p.assetCode.toUpperCase(), { priceAt: p.priceAt });
 
-  const stalePrices = holdingsCalc
-    .filter(({ h, daysOld }) => isNonManual(h.type) && daysOld != null && daysOld > STALE_DAYS)
-    .map(({ h, daysOld }) => ({ asset_code: h.symbol, days_old: daysOld! }));
+  const missingPrices = holdingsWithValue
+    .filter((h) => isNonManual(h.type) && (h.currentValue ?? 0) === 0)
+    .map((h) => h.symbol);
 
-  const negativeCash = holdingsCalc.some(({ h, currentValue }) => norm(h.type) === "cash" && currentValue < 0);
+  const stalePrices = holdingsWithValue
+    .filter((h) => {
+      if (!isNonManual(h.type)) return false;
+      const ph = priceMap.get(h.symbol.toUpperCase());
+      if (!ph) return false;
+      return Math.floor((now.getTime() - ph.priceAt.getTime()) / msPerDay) > STALE_DAYS;
+    })
+    .map((h) => {
+      const ph = priceMap.get(h.symbol.toUpperCase())!;
+      return { asset_code: h.symbol, days_old: Math.floor((now.getTime() - ph.priceAt.getTime()) / msPerDay) };
+    });
+
+  const negativeCash = holdingsWithValue.some((h) => norm(h.type) === "cash" && (h.currentValue ?? 0) < 0);
 
   const allPriceDates = latestPrices.map((p) => p.priceAt.getTime()).filter(Boolean);
   const lastPriceUpdate = allPriceDates.length > 0
@@ -223,24 +253,28 @@ router.get("/ai/context", async (_req, res): Promise<void> => {
     : null;
 
   const data_quality = {
-    missing_prices:   missingPrices,
-    stale_prices:     stalePrices,
-    negative_cash:    negativeCash,
-    base_assets_note: "base_assets use base_year value — not live market price",
-    xirr_note:        "xirr excluded — compute from /api/holdings endpoint",
+    missing_prices:    missingPrices,
+    stale_prices:      stalePrices,
+    negative_cash:     negativeCash,
+    base_assets_note:  "base_assets use base_year value — not live market price",
+    xirr_note:         "xirr excluded — compute from /api/holdings endpoint",
     last_price_update: lastPriceUpdate,
-    issues_count:     missingPrices.length + stalePrices.length + (negativeCash ? 1 : 0),
+    issues_count:      missingPrices.length + stalePrices.length + (negativeCash ? 1 : 0),
   };
 
-  res.json({
-    as_of:             now.toISOString(),
+  return {
+    as_of:            now.toISOString(),
     dashboard_summary,
     current_allocation,
-    current_holdings:  [...current_holdings, ...base_assets_detail],
+    current_holdings: [...current_holdings, ...base_assets_detail],
     loans_summary,
     cashflow_summary,
     data_quality,
-  });
+  };
+};
+
+router.get("/ai/context", async (_req, res): Promise<void> => {
+  res.json(await buildAIContext());
 });
 
 export default router;
