@@ -20,10 +20,13 @@ export const HealthCheckResponse = zod.object({
  */
 export const ListHoldingsResponseItem = zod.object({
   id: zod.number(),
+  investmentGroup: zod.string(),
   type: zod.string(),
   symbol: zod.string(),
   quantity: zod.number(),
   manualPrice: zod.number().nullish(),
+  costOfCapital: zod.number().nullish(),
+  interest: zod.number().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -57,6 +60,8 @@ export const ImportHoldingsResponse = zod.object({
       symbol: zod.string(),
       quantity: zod.number(),
       manualPrice: zod.number().nullish(),
+      costOfCapital: zod.number().nullish(),
+      interest: zod.number().nullish(),
       createdAt: zod.date(),
       updatedAt: zod.date(),
     }),
@@ -78,10 +83,13 @@ export const UpdateHoldingBody = zod.object({
 
 export const UpdateHoldingResponse = zod.object({
   id: zod.number(),
+  investmentGroup: zod.string(),
   type: zod.string(),
   symbol: zod.string(),
   quantity: zod.number(),
   manualPrice: zod.number().nullish(),
+  costOfCapital: zod.number().nullish(),
+  interest: zod.number().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -124,6 +132,7 @@ export const ListSnapshotsResponseItem = zod.object({
   totalValue: zod.number(),
   stockValue: zod.number(),
   goldValue: zod.number(),
+  typeValues: zod.record(zod.string(), zod.number()),
   snapshotAt: zod.date(),
 });
 export const ListSnapshotsResponse = zod.array(ListSnapshotsResponseItem);
@@ -139,6 +148,7 @@ export const GetPortfolioSummaryResponse = zod.object({
   holdings: zod.array(
     zod.object({
       id: zod.number(),
+      investmentGroup: zod.string(),
       type: zod.string(),
       symbol: zod.string(),
       quantity: zod.number(),
@@ -147,6 +157,14 @@ export const GetPortfolioSummaryResponse = zod.object({
       change: zod.number().nullable(),
       changePercent: zod.number().nullable(),
       manualPrice: zod.number().nullable(),
+      costOfCapital: zod.number().nullable(),
+      interest: zod.number().nullable(),
+      quantityRemaining: zod.number(),
+      avgCost: zod.number().nullable(),
+      costBasisRemaining: zod.number().nullable(),
+      realizedPnl: zod.number(),
+      unrealizedPnl: zod.number().nullable(),
+      totalPnl: zod.number().nullable(),
     }),
   ),
 });

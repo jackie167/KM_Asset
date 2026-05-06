@@ -237,6 +237,12 @@ components:
         manualPrice:
           type: number
           nullable: true
+        costOfCapital:
+          type: number
+          nullable: true
+        interest:
+          type: number
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -334,6 +340,10 @@ components:
           type: number
         goldValue:
           type: number
+        typeValues:
+          type: object
+          additionalProperties:
+            type: number
         snapshotAt:
           type: string
           format: date-time
@@ -342,6 +352,7 @@ components:
         - totalValue
         - stockValue
         - goldValue
+        - typeValues
         - snapshotAt
 
     ImportResult:
@@ -386,6 +397,22 @@ components:
           type: ["number", "null"]
         manualPrice:
           type: ["number", "null"]
+        costOfCapital:
+          type: ["number", "null"]
+        interest:
+          type: ["number", "null"]
+        quantityRemaining:
+          type: number
+        avgCost:
+          type: ["number", "null"]
+        costBasisRemaining:
+          type: ["number", "null"]
+        realizedPnl:
+          type: number
+        unrealizedPnl:
+          type: ["number", "null"]
+        totalPnl:
+          type: ["number", "null"]
       required:
         - id
         - type
@@ -396,6 +423,14 @@ components:
         - change
         - changePercent
         - manualPrice
+        - costOfCapital
+        - interest
+        - quantityRemaining
+        - avgCost
+        - costBasisRemaining
+        - realizedPnl
+        - unrealizedPnl
+        - totalPnl
 
     PortfolioSummary:
       type: object

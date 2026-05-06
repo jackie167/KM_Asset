@@ -5,11 +5,13 @@
  * Finance Tracker API
  * OpenAPI spec version: 0.1.0
  */
+import type { SnapshotTypeValues } from "./snapshotTypeValues";
 
 export interface Snapshot {
   id: number;
   totalValue: number;
   stockValue: number;
   goldValue: number;
+  typeValues: SnapshotTypeValues;
   snapshotAt: Date;
 }

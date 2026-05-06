@@ -5,13 +5,22 @@ import {
   useDeleteHolding,
   useRefreshPrices,
   useGetPortfolioSummary,
-  useListSnapshots,
   getListHoldingsQueryKey,
   getGetPortfolioSummaryQueryKey,
   getListSnapshotsQueryKey,
-  type Holding
+  type Holding,
 } from "@workspace/api-client-react";
 import { useToast } from "./use-toast";
+import type { SnapshotRange } from "@/pages/assets/types";
+
+export type PortfolioSnapshot = {
+  id: number;
+  totalValue: number;
+  stockValue: number;
+  goldValue: number;
+  typeValues: Record<string, number>;
+  snapshotAt: string;
+};
 
 async function fetchHoldings(): Promise<Holding[]> {
   const res = await fetch("/api/holdings");
@@ -21,13 +30,24 @@ async function fetchHoldings(): Promise<Holding[]> {
   return res.json();
 }
 
-export function usePortfolioData() {
+async function fetchSnapshots(range: SnapshotRange): Promise<PortfolioSnapshot[]> {
+  const res = await fetch(`/api/snapshots?range=${encodeURIComponent(range)}`);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export function usePortfolioData(snapshotRange: SnapshotRange = "1m") {
   const holdingsQuery = useQuery({
     queryKey: getListHoldingsQueryKey(),
     queryFn: fetchHoldings,
   });
   const summaryQuery = useGetPortfolioSummary();
-  const snapshotsQuery = useListSnapshots();
+  const snapshotsQuery = useQuery({
+    queryKey: [...getListSnapshotsQueryKey(), snapshotRange],
+    queryFn: () => fetchSnapshots(snapshotRange),
+  });
 
   const isLoading = holdingsQuery.isLoading || summaryQuery.isLoading || snapshotsQuery.isLoading;
   const isError = holdingsQuery.isError || summaryQuery.isError || snapshotsQuery.isError;

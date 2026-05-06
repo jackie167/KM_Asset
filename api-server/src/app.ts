@@ -75,6 +75,6 @@ app.get("/", (_req, res) => {
   return res.send("Server is running");
 });
 
-//startPriceScheduler();
+startPriceScheduler();
 
 export { app };

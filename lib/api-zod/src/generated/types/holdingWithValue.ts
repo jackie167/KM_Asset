@@ -8,6 +8,7 @@
 
 export interface HoldingWithValue {
   id: number;
+  investmentGroup: string;
   type: string;
   symbol: string;
   quantity: number;
@@ -19,4 +20,20 @@ export interface HoldingWithValue {
   change: number | null;
   /** @nullable */
   changePercent: number | null;
+  /** @nullable */
+  manualPrice: number | null;
+  /** @nullable */
+  costOfCapital: number | null;
+  /** @nullable */
+  interest: number | null;
+  quantityRemaining: number;
+  /** @nullable */
+  avgCost: number | null;
+  /** @nullable */
+  costBasisRemaining: number | null;
+  realizedPnl: number;
+  /** @nullable */
+  unrealizedPnl: number | null;
+  /** @nullable */
+  totalPnl: number | null;
 }

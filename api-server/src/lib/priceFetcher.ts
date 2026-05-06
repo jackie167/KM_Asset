@@ -1,6 +1,8 @@
 import * as cheerio from "cheerio";
-import { db, pricesTable, holdingsTable, snapshotsTable } from "../../../lib/db/src/index.ts";
-import { desc, gte } from "drizzle-orm";
+import { db, pricesTable, holdingsTable, snapshotsTable, snapshotTypeValuesTable, priceHistoryTable } from "../../../lib/db/src/index.ts";
+import { buildPriceHistoryRow, getUtcDayRange } from "./priceHistory.js";
+import { and, desc, eq, gte, lt } from "drizzle-orm";
+import { createPriceScheduler } from "./priceScheduler.js";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -11,6 +13,10 @@ interface PriceData {
   price: number;
   change: number | null;
   changePercent: number | null;
+}
+
+function normalizeHoldingType(type: string): string {
+  return type.trim().toLowerCase();
 }
 
 const COINGECKO_ID_MAP: Record<string, string> = {
@@ -201,6 +207,14 @@ interface SJCApiResponse {
   }>;
 }
 
+function normalizeSjcGoldPrice(raw: number): number | null {
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  if (raw >= 50_000_000 && raw <= 500_000_000) return raw;
+  if (raw >= 50_000 && raw <= 500_000) return raw * 1_000;
+  if (raw >= 50 && raw <= 500) return raw * 1_000_000;
+  return null;
+}
+
 /**
  * Fetch gold price from SJC's official JSON API.
  * Primary: https://sjc.com.vn/GoldPrice/Services/PriceService.ashx
@@ -240,9 +254,9 @@ async function fetchGoldPriceSJC(): Promise<PriceData[]> {
       (d.TypeName.toLowerCase().includes("sjc") && d.TypeName.toLowerCase().includes("lượng"))
     ) ?? json.data[0];
 
-    const buyPrice = luong1Entry.BuyValue;
+    const buyPrice = normalizeSjcGoldPrice(luong1Entry.BuyValue);
     if (!buyPrice || buyPrice <= 0) {
-      console.error(`[PriceFetcher] SJC API: invalid BuyValue for ${luong1Entry.TypeName}: ${buyPrice}`);
+      console.error(`[PriceFetcher] SJC API: invalid BuyValue for ${luong1Entry.TypeName}: ${luong1Entry.BuyValue}`);
       return await fetchGoldPriceSJCHtmlFallback();
     }
 
@@ -313,16 +327,15 @@ async function fetchGoldPriceSJCHtmlFallback(): Promise<PriceData[]> {
       const rowText = $(row).text().toLowerCase();
       if (
         rowText.includes("1l") ||
+        rowText.includes("1 lượng") ||
         rowText.includes("10l") ||
         rowText.includes("1kg") ||
         (rowText.includes("sjc") && rowText.includes("miếng"))
       ) {
         const buyCell = $(cells[1]).text().replace(/[^0-9]/g, "");
         const num = parseInt(buyCell, 10);
-        if (!isNaN(num) && num > 50_000 && num < 300_000) {
-          buyPrice = num * 1_000_000;
-        } else if (!isNaN(num) && num > 50_000_000) {
-          buyPrice = num;
+        if (!isNaN(num)) {
+          buyPrice = normalizeSjcGoldPrice(num);
         }
       }
     });
@@ -351,15 +364,21 @@ export async function fetchAndStorePrices(): Promise<{ updated: number; message:
   }
 
   const stockSymbols = [
-    ...new Set(holdings.filter((h) => h.type === "stock").map((h) => h.symbol.toUpperCase())),
+    ...new Set(holdings.filter((h) => normalizeHoldingType(h.type) === "stock").map((h) => h.symbol.toUpperCase())),
   ];
-  const hasGold = holdings.some((h) => h.type === "gold");
+  const goldSymbols = [
+    ...new Set(holdings.filter((h) => normalizeHoldingType(h.type) === "gold").map((h) => h.symbol.toUpperCase())),
+  ];
+  const hasGold = goldSymbols.length > 0;
 
   // Detect crypto: non-stock/gold holdings whose symbol is in the CoinGecko map
   const cryptoSymbols = [
     ...new Set(
       holdings
-        .filter((h) => h.type !== "stock" && h.type !== "gold")
+        .filter((h) => {
+          const normalizedType = normalizeHoldingType(h.type);
+          return normalizedType !== "stock" && normalizedType !== "gold";
+        })
         .map((h) => h.symbol.toUpperCase())
         .filter((s) => COINGECKO_ID_MAP[s])
     ),
@@ -367,20 +386,30 @@ export async function fetchAndStorePrices(): Promise<{ updated: number; message:
 
   console.log(
     `[PriceFetcher] Starting fetch for ${stockSymbols.length} stock(s)` +
-    `${hasGold ? " + gold" : ""}` +
+    `${hasGold ? " + gold(SJC benchmark)" : ""}` +
     `${cryptoSymbols.length ? ` + crypto (${cryptoSymbols.join(", ")})` : ""}`
   );
 
   const stockPromises = stockSymbols.map(fetchStockPriceYahoo);
-  const [stockResults, goldResults, cryptoResults] = await Promise.all([
+  const [stockResults, sjcGoldResults, cryptoResults] = await Promise.all([
     Promise.all(stockPromises),
     hasGold ? fetchGoldPriceSJC() : Promise.resolve([] as PriceData[]),
     cryptoSymbols.length ? fetchCryptoPricesCoinGecko(cryptoSymbols) : Promise.resolve([] as PriceData[]),
   ]);
 
+  const goldBenchmark = sjcGoldResults.find((price) => price.symbol.toUpperCase() === "SJC_1L") ?? sjcGoldResults[0] ?? null;
+  const normalizedGoldResults =
+    goldBenchmark != null
+      ? goldSymbols.map((symbol) => ({
+          ...goldBenchmark,
+          symbol,
+          type: "gold",
+        }))
+      : [];
+
   const prices: PriceData[] = [
     ...stockResults.filter((p): p is PriceData => p !== null),
-    ...goldResults,
+    ...normalizedGoldResults,
     ...cryptoResults,
   ];
 
@@ -389,6 +418,7 @@ export async function fetchAndStorePrices(): Promise<{ updated: number; message:
     return { updated: 0, message: "Could not fetch prices — check server logs for details" };
   }
 
+  const fetchedAt = new Date();
   for (const p of prices) {
     await db.insert(pricesTable).values({
       type: p.type,
@@ -396,8 +426,45 @@ export async function fetchAndStorePrices(): Promise<{ updated: number; message:
       price: String(p.price),
       change: p.change != null ? String(p.change) : null,
       changePercent: p.changePercent != null ? String(p.changePercent) : null,
-      fetchedAt: new Date(),
+      fetchedAt,
     });
+  }
+
+  const holdingBySymbol = new Map(holdings.map((holding) => [holding.symbol.toUpperCase(), holding]));
+  const { start: historyDayStart, end: historyDayEnd } = getUtcDayRange(fetchedAt);
+  for (const price of prices) {
+    const holding = holdingBySymbol.get(price.symbol.toUpperCase());
+    const quantity = holding ? parseFloat(String(holding.quantity)) : null;
+    const historyRow = buildPriceHistoryRow({
+        assetCode: price.symbol,
+        assetType: price.type,
+        priceOrValue: price.price,
+        quantity,
+        source: "online_api",
+        note: "daily online price",
+        priceAt: fetchedAt,
+    });
+    const [existing] = await db
+      .select({ id: priceHistoryTable.id })
+      .from(priceHistoryTable)
+      .where(
+        and(
+          eq(priceHistoryTable.assetCode, price.symbol.toUpperCase()),
+          eq(priceHistoryTable.source, "online_api"),
+          gte(priceHistoryTable.priceAt, historyDayStart),
+          lt(priceHistoryTable.priceAt, historyDayEnd),
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(priceHistoryTable)
+        .set(historyRow)
+        .where(eq(priceHistoryTable.id, existing.id));
+    } else {
+      await db.insert(priceHistoryTable).values(historyRow);
+    }
   }
 
   await savePortfolioSnapshot(holdings, prices);
@@ -414,10 +481,18 @@ async function savePortfolioSnapshot(
   for (const p of prices) {
     priceMap.set(p.symbol.toUpperCase(), p.price);
   }
+  const latestStoredPrices = await getLatestPrices();
+  for (const p of latestStoredPrices) {
+    const symbol = p.symbol.toUpperCase();
+    if (!priceMap.has(symbol)) {
+      priceMap.set(symbol, parseFloat(String(p.price)));
+    }
+  }
 
   let stockValue = 0;
   let goldValue = 0;
   let otherValue = 0;
+  const typeTotals = new Map<string, number>();
 
   for (const h of holdings) {
     const qty = parseFloat(String(h.quantity));
@@ -425,18 +500,35 @@ async function savePortfolioSnapshot(
     const price = priceMap.get(sym) ?? (h.manualPrice != null ? parseFloat(String(h.manualPrice)) : null);
     if (price == null) continue;
     const val = qty * price;
-    if (h.type === "stock") stockValue += val;
-    else if (h.type === "gold") goldValue += val;
+    const normalizedType = normalizeHoldingType(h.type);
+    typeTotals.set(normalizedType, (typeTotals.get(normalizedType) ?? 0) + val);
+    if (normalizedType === "stock") stockValue += val;
+    else if (normalizedType === "gold") goldValue += val;
     else otherValue += val;
   }
 
   const totalValue = stockValue + goldValue + otherValue;
   if (totalValue > 0) {
-    await db.insert(snapshotsTable).values({
-      totalValue: String(totalValue),
-      stockValue: String(stockValue),
-      goldValue: String(goldValue),
-      snapshotAt: new Date(),
+    await db.transaction(async (tx) => {
+      const [snapshot] = await tx
+        .insert(snapshotsTable)
+        .values({
+          totalValue: String(totalValue),
+          stockValue: String(stockValue),
+          goldValue: String(goldValue),
+          snapshotAt: new Date(),
+        })
+        .returning({ id: snapshotsTable.id });
+
+      if (snapshot && typeTotals.size > 0) {
+        await tx.insert(snapshotTypeValuesTable).values(
+          Array.from(typeTotals.entries()).map(([type, value]) => ({
+            snapshotId: snapshot.id,
+            type,
+            value: String(value),
+          })),
+        );
+      }
     });
     console.log(`[PriceFetcher] Snapshot saved: total=${totalValue.toLocaleString()} VND`);
   }
@@ -446,8 +538,7 @@ export async function getLatestPrices(): Promise<typeof pricesTable.$inferSelect
   const rows = await db
     .select()
     .from(pricesTable)
-    .orderBy(desc(pricesTable.fetchedAt))
-    .limit(1000);
+    .orderBy(desc(pricesTable.fetchedAt));
 
   const seen = new Set<string>();
   const result: typeof pricesTable.$inferSelect[] = [];
@@ -460,58 +551,37 @@ export async function getLatestPrices(): Promise<typeof pricesTable.$inferSelect
   return result;
 }
 
-let schedulerTimeout: ReturnType<typeof setTimeout> | null = null;
-const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+export const PRICE_SCHEDULER_INTERVAL_MS = 60 * 60 * 1000;
+let priceScheduler: ReturnType<typeof createPriceScheduler> | null = null;
 
-function getNextRunTime(now: Date): Date {
-  const nowVn = new Date(now.getTime() + VN_OFFSET_MS);
-  const vnYear = nowVn.getUTCFullYear();
-  const vnMonth = nowVn.getUTCMonth();
-  const vnDate = nowVn.getUTCDate();
-  const vnHour = nowVn.getUTCHours();
-  const vnMinute = nowVn.getUTCMinutes();
-  const vnSecond = nowVn.getUTCSeconds();
-  const vnMs = nowVn.getUTCMilliseconds();
+type SchedulerDeps = {
+  runFetch?: typeof fetchAndStorePrices;
+  now?: () => number;
+  log?: Pick<Console, "log" | "error">;
+};
 
-  const makeUtcFromVn = (year: number, month: number, date: number, hour: number) => {
-    return new Date(Date.UTC(year, month, date, hour - 7, 0, 0, 0));
-  };
+export function startPriceScheduler(deps: SchedulerDeps = {}): void {
+  if (priceScheduler) return;
 
-  if (vnHour < 10 || (vnHour === 10 && vnMinute === 0 && vnSecond === 0 && vnMs === 0)) {
-    return makeUtcFromVn(vnYear, vnMonth, vnDate, 10);
-  }
-  if (vnHour < 17 || (vnHour === 17 && vnMinute === 0 && vnSecond === 0 && vnMs === 0)) {
-    return makeUtcFromVn(vnYear, vnMonth, vnDate, 17);
-  }
-
-  return makeUtcFromVn(vnYear, vnMonth, vnDate + 1, 10);
+  const runFetch = deps.runFetch ?? fetchAndStorePrices;
+  const now = deps.now ?? Date.now;
+  const log = deps.log ?? console;
+  priceScheduler = createPriceScheduler({
+    intervalMs: PRICE_SCHEDULER_INTERVAL_MS,
+    now,
+    log,
+    startMessage: "[PriceFetcher] Starting price scheduler (every 60 minutes)",
+    runTask: async () => {
+      const result = await runFetch();
+      log.log("[PriceFetcher] Scheduled fetch result:", result.message);
+    },
+  });
+  priceScheduler.start();
 }
 
-export function startPriceScheduler(): void {
-  if (schedulerTimeout) return;
-
-  console.log("[PriceFetcher] Starting price scheduler (10:00 and 17:00 Vietnam time)");
-
-  const scheduleNext = () => {
-    const now = new Date();
-    const nextRun = getNextRunTime(now);
-    const delayMs = Math.max(0, nextRun.getTime() - now.getTime());
-
-    const nextRunVn = new Date(nextRun.getTime() + VN_OFFSET_MS);
-    const vnLabel = nextRunVn.toISOString().replace("T", " ").slice(0, 19) + " (VN)";
-    console.log(`[PriceFetcher] Next scheduled fetch at ${vnLabel}`);
-
-    schedulerTimeout = setTimeout(() => {
-      console.log("[PriceFetcher] Running scheduled price fetch...");
-      fetchAndStorePrices()
-        .then((r) => console.log("[PriceFetcher] Scheduled fetch result:", r.message))
-        .catch((e) => console.error("[PriceFetcher] Scheduled fetch failed:", e))
-        .finally(() => {
-          schedulerTimeout = null;
-          scheduleNext();
-        });
-    }, delayMs);
-  };
-
-  scheduleNext();
+export function stopPriceScheduler(): void {
+  if (priceScheduler) {
+    priceScheduler.stop();
+    priceScheduler = null;
+  }
 }

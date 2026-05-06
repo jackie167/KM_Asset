@@ -17,4 +17,5 @@ export * from "./portfolioSummary";
 export * from "./price";
 export * from "./refreshResult";
 export * from "./snapshot";
+export * from "./snapshotTypeValues";
 export * from "./updateHoldingBody";

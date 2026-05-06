@@ -22,11 +22,12 @@ interface ImportDialogProps {
 
 function downloadTemplate() {
   const csv = [
-    "symbol,quantity,total_value",
-    "HPG,5400,",
-    "SJC_1L,10.8,",
-    "BTC,0.091,",
-    "VESAF,1000,15000000",
+    "asset_code,asset_type,quantity,current_price,current_value,cost_of_capital,interest",
+    "HPG,stock,5400,,,,",
+    "SJC_1L,gold,10.8,,,,",
+    "BTC,crypto,0.091,,,,",
+    "VESAF,fund,1000,15000,15000000,14000000,",
+    "CASH,cash,1,6281734000,6281734000,7440694000,",
   ].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -112,25 +113,29 @@ export default function ImportDialog({ open, onClose, onSuccess }: ImportDialogP
         <div className="space-y-4 mt-2">
           <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground space-y-1.5">
             <p className="font-medium text-foreground">Định dạng file: CSV, XLS, XLSX</p>
-            <p>File cần có các cột sau:</p>
+            <p>File import thường cần các cột sau; workbook sync export sẽ tự đọc các sheet Investment, Transactions, CashFlows, PriceHistory:</p>
             <ul className="space-y-1 pl-3 list-disc">
               <li>
-                <code className="bg-muted px-1 rounded">symbol</code>
+                <code className="bg-muted px-1 rounded">asset_code</code>
                 {" "}— mã tài sản (HPG, SJC_1L, BTC...)
+              </li>
+              <li>
+                <code className="bg-muted px-1 rounded">asset_type</code>
+                {" "}— loại tài sản (stock, gold, crypto, fund, cash...)
               </li>
               <li>
                 <code className="bg-muted px-1 rounded">quantity</code>
                 {" "}— số lượng <span className="text-foreground font-medium">(bắt buộc, thay thế số lượng hiện tại)</span>
               </li>
               <li>
-                <code className="bg-muted px-1 rounded">total_value</code>
-                {" "}— giá trị tổng bằng VND, <span className="italic">để trống nếu tài sản đã có giá online</span>
+                <code className="bg-muted px-1 rounded">current_price/current_value/cost_of_capital</code>
+                {" "}— dùng cho tài sản manual/cash và tính P/L
               </li>
             </ul>
             <div className="pt-0.5 space-y-0.5 text-[10px]">
-              <p>• Tài sản đã có trên app → cập nhật số lượng (và giá trị nếu có)</p>
-              <p>• Tài sản chưa có → tạo mới với loại được tự nhận diện</p>
-              <p>• File export có thể dùng lại để import</p>
+              <p>• CSV cũ symbol/type/quantity vẫn dùng được</p>
+              <p>• File Export Sync Workbook có thể import lại để đồng bộ đủ holdings, giao dịch, cashflow và price history</p>
+              <p>• Với sync workbook, holdings không còn trong sheet Investment sẽ bị loại khỏi danh mục</p>
             </div>
             <button
               onClick={downloadTemplate}
@@ -181,7 +186,7 @@ export default function ImportDialog({ open, onClose, onSuccess }: ImportDialogP
               <div className="flex gap-4 text-sm">
                 <span className="text-green-400 font-medium">✅ {result.imported} đã cập nhật</span>
                 {result.skipped > 0 && (
-                  <span className="text-muted-foreground">⊘ {result.skipped} bỏ qua</span>
+                  <span className="text-muted-foreground">⊘ {result.skipped} bị loại khỏi danh mục</span>
                 )}
               </div>
               {result.errors.length > 0 && (

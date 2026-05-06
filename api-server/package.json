@@ -5,20 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx src/index.ts",
-    "build": "/app/node_modules/.bin/esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --outdir=dist",
+    "build": "../node_modules/.bin/esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --alias:@workspace/db=../lib/db/src/index.ts --alias:@workspace/api-zod=../lib/api-zod/src/index.ts --outdir=dist",
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
-    "esbuild": "^0.27.3",
     "cheerio": "^1.2.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
     "drizzle-zod": "^0.8.3",
+    "esbuild": "^0.27.3",
     "express": "^5.0.0",
+    "hyperformula": "^2.7.1",
     "multer": "^2.1.1",
     "pg": "^8.20.0",
     "xlsx": "^0.18.5"
