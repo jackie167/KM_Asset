@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -10,7 +9,6 @@ import PerformanceChart from "@/pages/assets/PerformanceChart";
 import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
 import { deriveInvestmentGroup, formatVND, formatVNDFull, formatTypeLabel } from "@/pages/assets/utils";
-import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
 type RouteParams = {
   type: string;
@@ -35,15 +33,6 @@ export default function AssetTypePage() {
   const normalizedType = (params?.type ?? "").toLowerCase();
   const isInvestmentGroupPage = normalizedType === "financial" || normalizedType === "real_estate";
 
-  const totalPortfolioQuery = useQuery({
-    queryKey: ["wealth-allocation-holdings-total"],
-    queryFn: async () => {
-      const wealthHoldings = await fetchWealthAllocationHoldings();
-      return wealthHoldings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
-    },
-    enabled: normalizedType === "financial",
-  });
-  const totalPortfolioValue = totalPortfolioQuery.data ?? undefined;
   const holdings: HoldingItem[] = (summary?.holdings ?? holdingsFromApi) as HoldingItem[];
   const typeHoldings = useMemo(
     () => holdings.filter((holding) => {
@@ -201,7 +190,6 @@ export default function AssetTypePage() {
                     groupBy={normalizedType === "real_estate" ? (holding) => holding.symbol : undefined}
                     onTypeSelect={normalizedType === "real_estate" ? undefined : handleOpenDetailType}
                     showTargets={normalizedType === "financial"}
-                    totalPortfolioValue={normalizedType === "financial" ? totalPortfolioValue : undefined}
                   />
                 )}
                 <PerformanceChart

@@ -33,7 +33,6 @@ async function saveTargets(key: string, targets: Record<string, number>): Promis
 type AllocationChartProps = {
   holdings: HoldingItem[];
   totalValue: number;
-  totalPortfolioValue?: number;
   onTypeSelect?: (type: string) => void;
   title?: string;
   groupBy?: (holding: HoldingItem) => string;
@@ -46,7 +45,6 @@ type AllocationChartProps = {
 export default function AllocationChart({
   holdings,
   totalValue,
-  totalPortfolioValue,
   onTypeSelect,
   title = "Asset Allocation",
   groupBy = (holding) => holding.type.toLowerCase(),
@@ -191,7 +189,6 @@ export default function AllocationChart({
               <th className="py-1.5 px-3 text-center font-normal border-b border-border">Share</th>
               {showTargets && (
                 <>
-                  <th className="py-1.5 px-3 text-center font-normal border-b border-border">Rate/Asset</th>
                   <th className="py-1.5 px-3 text-center font-normal border-b border-border">Target</th>
                   <th className="py-1.5 px-3 text-center font-normal border-b border-border">Deviation</th>
                 </>
@@ -205,11 +202,7 @@ export default function AllocationChart({
           <tbody>
             {data.map((entry, index) => {
               const target = targets[entry.type];
-              const rateAsset = totalPortfolioValue && totalPortfolioValue > 0
-                ? (entry.value / totalPortfolioValue) * 100
-                : null;
-              const deviationBasis = rateAsset ?? entry.pct;
-              const deviation = target != null ? deviationBasis - target : null;
+              const deviation = target != null ? entry.pct - target : null;
               return (
                 <tr
                   key={entry.type}
@@ -229,12 +222,6 @@ export default function AllocationChart({
                   </td>
                   {showTargets && (
                     <>
-                      <td
-                        className="py-2.5 px-3 text-[11px] text-center tabular-nums text-muted-foreground"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {rateAsset != null ? `${rateAsset.toFixed(1)}%` : <span className="text-border">—</span>}
-                      </td>
                       <td
                         className="py-2.5 px-3 text-center"
                         onClick={(e) => { e.stopPropagation(); startEdit(entry.type, target); }}
