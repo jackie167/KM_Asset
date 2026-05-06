@@ -382,7 +382,7 @@ export default function FinancialDashboardPage() {
         {/* ── Tổng quan ─────────────────────────────────────────────────── */}
         <section className="space-y-2">
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng quan</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
             <SummaryPanel
               title="Tài sản"
