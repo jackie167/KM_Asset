@@ -7,6 +7,7 @@ export type HoldingForm = {
 
 export type HoldingItem = {
   id: number;
+  baseAssetId?: number | null;
   investmentGroup?: string | null;
   type: string;
   symbol: string;

@@ -210,13 +210,17 @@ export type BaseAsset = {
   baseValue: number;
   assumedReturnRate: number;
   note: string | null;
+  displayName: string | null;
+  displayType: string | null;
 };
 
 function baseAssetToHolding(asset: BaseAsset): HoldingItem {
   return {
     id: asset.id,
-    symbol: asset.symbol,
-    type: normalizeWealthType(asset.assetType),
+    baseAssetId: asset.id,
+    // displayName/displayType are UI overrides; join keys (symbol, assetType) are untouched
+    symbol: asset.displayName ?? asset.symbol,
+    type: normalizeWealthType(asset.displayType ?? asset.assetType),
     quantity: 1,
     currentPrice: asset.baseValue,
     currentValue: asset.baseValue,

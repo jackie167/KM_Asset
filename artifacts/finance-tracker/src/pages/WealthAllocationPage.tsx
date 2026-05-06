@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
+import BaseAssetEditModal from "@/components/BaseAssetEditModal";
 import AllocationChart from "@/pages/assets/AllocationChart";
 import AssetsHeader from "@/pages/assets/AssetsHeader";
 import HoldingsTable from "@/pages/assets/HoldingsTable";
@@ -49,6 +50,7 @@ export default function WealthAllocationPage() {
   const [cashFlows, setCashFlows] = useState<CashFlow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingAssetId, setEditingAssetId] = useState<number | null>(null);
 
   const loadWealthAllocation = useCallback(async () => {
     setIsLoading(true);
@@ -315,11 +317,20 @@ export default function WealthAllocationPage() {
               onTogglePriceCol={togglePriceCol}
               onFilterTypeChange={setFilterType}
               onCycleSortOrder={cycleSortOrder}
+              onSymbolClick={(h) => { if (h.baseAssetId != null) setEditingAssetId(h.baseAssetId); }}
               readOnly
             />
           </>
         )}
       </main>
+
+      {editingAssetId != null && (
+        <BaseAssetEditModal
+          assetId={editingAssetId}
+          onClose={() => setEditingAssetId(null)}
+          onSaved={() => { setEditingAssetId(null); loadWealthAllocation(); }}
+        />
+      )}
     </div>
   );
 }
