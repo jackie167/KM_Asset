@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useLocation, useRoute } from "wouter";
+import { useLocation, useRoute } from "wouter";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { usePortfolioData } from "@/hooks/use-portfolio";
@@ -144,30 +144,13 @@ export default function AssetTypePage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border px-3 sm:px-4 md:px-6 py-3 sticky top-0 bg-background/95 backdrop-blur z-10">
         <div className="md:max-w-5xl xl:max-w-7xl mx-auto space-y-3">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-semibold tracking-tight">{typeLabel}</h1>
-              {lastUpdated && (
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Updated: {format(new Date(lastUpdated), "HH:mm dd/MM/yyyy")}
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <Link href="/" className="hover:text-foreground transition-colors">
-                Home
-              </Link>
-              <Link href="/assets" className="hover:text-foreground transition-colors">
-                Investment
-              </Link>
-              <Link href="/wealth-allocation" className="hover:text-foreground transition-colors">
-                Wealth Allocation
-              </Link>
-              <Link href="/excel" className="hover:text-foreground transition-colors">
-                Excel
-              </Link>
-            </div>
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-semibold tracking-tight">{typeLabel}</h1>
+            {lastUpdated && (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Updated: {format(new Date(lastUpdated), "HH:mm dd/MM/yyyy")}
+              </p>
+            )}
           </div>
 
         </div>
