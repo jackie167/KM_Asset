@@ -10,6 +10,7 @@ import PerformanceChart from "@/pages/assets/PerformanceChart";
 import PortfolioSummaryCard from "@/pages/assets/PortfolioSummaryCard";
 import type { ChartPoint, HoldingItem, SnapshotRange, SortOrder } from "@/pages/assets/types";
 import { deriveInvestmentGroup, formatVND, formatVNDFull, formatTypeLabel } from "@/pages/assets/utils";
+import { fetchWealthAllocationHoldings } from "@/pages/wealthAllocationData";
 
 type RouteParams = {
   type: string;
@@ -31,21 +32,18 @@ export default function AssetTypePage() {
     () => localStorage.getItem("col_cost_of_capital") !== "0"
   );
 
-  const totalPortfolioQuery = useQuery({
-    queryKey: ["settings", "portfolio_live_total"],
-    queryFn: async () => {
-      const res = await fetch("/api/settings/portfolio_live_total");
-      if (!res.ok) return null;
-      const data = await res.json();
-      const v = parseFloat(data.value);
-      return isNaN(v) ? null : v;
-    },
-    enabled: true,
-  });
-  const totalPortfolioValue = totalPortfolioQuery.data ?? undefined;
-
   const normalizedType = (params?.type ?? "").toLowerCase();
   const isInvestmentGroupPage = normalizedType === "financial" || normalizedType === "real_estate";
+
+  const totalPortfolioQuery = useQuery({
+    queryKey: ["wealth-allocation-holdings-total"],
+    queryFn: async () => {
+      const wealthHoldings = await fetchWealthAllocationHoldings();
+      return wealthHoldings.reduce((s, h) => s + (h.currentValue ?? 0), 0);
+    },
+    enabled: normalizedType === "financial",
+  });
+  const totalPortfolioValue = totalPortfolioQuery.data ?? undefined;
   const holdings: HoldingItem[] = (summary?.holdings ?? holdingsFromApi) as HoldingItem[];
   const typeHoldings = useMemo(
     () => holdings.filter((holding) => {
