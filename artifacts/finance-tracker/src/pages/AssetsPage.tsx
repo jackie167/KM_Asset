@@ -688,6 +688,7 @@ export default function AssetsPage() {
               cashAdjustedCost={cashCostBasis}
               realizedPnLBySymbol={realizedPnLBySymbol}
               formatMoney={formatMoney}
+              onSymbolClick={(h) => navigate(`/assets/detail/${encodeURIComponent(h.symbol)}`)}
               onToggleHoldingsCollapsed={toggleHoldingsCollapsed}
               onToggleQtyCol={toggleQtyCol}
               onTogglePriceCol={togglePriceCol}

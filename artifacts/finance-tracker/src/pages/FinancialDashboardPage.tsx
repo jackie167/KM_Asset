@@ -173,21 +173,18 @@ type SummaryRow = {
 function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
   return (
     <Card className="p-3 md:p-5">
-      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{title}</p>
-      <div className="mt-3 divide-y divide-border">
+      <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">{title}</p>
+      <div className="divide-y divide-border/40">
         {rows.map((row) => {
           const content = (
-            <div className={`py-7 first:pt-1 last:pb-1 space-y-2 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
-              <p className="text-[11px] text-muted-foreground uppercase tracking-widest leading-tight">{row.label}</p>
+            <div className={`flex items-center justify-between gap-2 py-2 first:pt-1 last:pb-1 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
+              <p className="text-xs text-muted-foreground shrink-0">{row.label}</p>
               {row.loading ? (
-                <div className="h-6 w-24 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
               ) : (
-                <>
-                  <p className={`text-base font-bold tabular-nums break-all leading-snug ${TONE_CLASS[row.tone ?? "neutral"]}`}>
-                    {row.value}
-                  </p>
-                  {row.sub && <p className={`text-xs font-medium tabular-nums ${TONE_CLASS[row.subTone ?? "neutral"]}`}>{row.sub}</p>}
-                </>
+                <p className={`text-sm font-semibold tabular-nums text-right ${TONE_CLASS[row.tone ?? "neutral"]}`}>
+                  {row.value}
+                </p>
               )}
             </div>
           );
@@ -322,7 +319,6 @@ export default function FinancialDashboardPage() {
       return sum + calculateHoldingPnL(holding, realizedPnLBySymbol, cashCostBasis);
     }, 0);
   }, [cashCostBasis, realizedPnLBySymbol, wealthHoldings]);
-  const totalAssetPnlText = `${totalAssetPnl >= 0 ? "+" : ""}${fmt(totalAssetPnl, true)} P/L`;
   const xirrAnnual = xirrQuery.data?.xirrAnnual ?? null;
   const forecastDebt = useMemo(() => (
     getForecastDebtForYear(
@@ -386,7 +382,7 @@ export default function FinancialDashboardPage() {
         {/* ── Tổng quan ─────────────────────────────────────────────────── */}
         <section className="space-y-2">
           <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Tổng quan</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 
             <SummaryPanel
               title="Tài sản"
@@ -394,24 +390,26 @@ export default function FinancialDashboardPage() {
                 {
                   label: "Tổng tài sản",
                   value: fmt(netWorth, true),
-                  sub: totalAssetPnlText,
-                  subTone: tone(totalAssetPnl),
                   loading: wealthLoading || baseAssetsQuery.isLoading || investLoading,
                   href: "/wealth-allocation",
                 },
                 {
                   label: "Nợ",
                   value: fmt(forecastDebt, true),
-                  sub: netWorth > 0 && forecastDebt ? `${formatPercent(forecastDebt / netWorth)} tổng tài sản` : undefined,
                   tone: "negative",
                   loading: debtLoading,
                 },
                 {
                   label: "Tài sản ròng",
                   value: fmt(netWorth > 0 ? netWorth - forecastDebt : null, true),
-                  sub: "Sau khi trừ nợ",
                   tone: "positive",
                   loading: wealthLoading || debtLoading,
+                },
+                {
+                  label: "P/L",
+                  value: `${totalAssetPnl >= 0 ? "+" : ""}${fmt(totalAssetPnl, true)}`,
+                  tone: tone(totalAssetPnl),
+                  loading: wealthLoading || baseAssetsQuery.isLoading || investLoading,
                 },
               ]}
             />
@@ -422,28 +420,25 @@ export default function FinancialDashboardPage() {
                 {
                   label: "Tổng đầu tư",
                   value: fmt(financialTotal, true),
-                  sub: `${formatPercent(financialRatio)} tổng tài sản`,
                   loading: investLoading,
                   href: "/assets",
                 },
                 {
                   label: "Lợi nhuận P/L",
-                  value: fmt(pnl, true),
-                  sub: formatPercent(pnlPct),
+                  value: `${pnl >= 0 ? "+" : ""}${fmt(pnl, true)}`,
                   tone: tone(pnl),
                   loading: investLoading,
                 },
                 {
                   label: "XIRR / Năm",
                   value: formatPercent(xirrAnnual),
-                  sub: xirrAnnual != null ? (xirrAnnual >= 0.1 ? "Trên mục tiêu 10%" : "Dưới mục tiêu 10%") : "Chưa có dữ liệu",
                   tone: xirrAnnual == null ? "neutral" : xirrAnnual >= 0.1 ? "positive" : xirrAnnual >= 0 ? "warn" : "negative",
                   loading: xirrQuery.isLoading,
                 },
               ]}
             />
 
-          </div>{/* end grid cols-2 */}
+          </div>{/* end grid */}
         </section>
 
         {/* ── Chỉ báo sức khoẻ tài chính ──────────────────────────────── */}

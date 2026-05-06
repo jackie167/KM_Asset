@@ -16,6 +16,7 @@ import ExpenseTrackerPage from "@/pages/ExpenseTrackerPage";
 import AssetForecastPage from "@/pages/AssetForecastPage";
 import IncomeForecastPage from "@/pages/IncomeForecastPage";
 import DebugAIPage from "@/pages/DebugAIPage";
+import AssetDetailPage from "@/pages/AssetDetailPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,6 +34,7 @@ function Router() {
       <Route path="/home" component={Home} />
       <Route path="/assets" component={AssetsPage} />
       <Route path="/assets/type/:type" component={AssetTypePage} />
+      <Route path="/assets/detail/:symbol" component={AssetDetailPage} />
       <Route path="/transactions" component={TransactionsPage} />
       <Route path="/wealth-allocation" component={WealthAllocationPage} />
       <Route path="/wealth-allocation/type/:type" component={WealthAllocationTypePage} />

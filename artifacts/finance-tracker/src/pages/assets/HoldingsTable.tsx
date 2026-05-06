@@ -117,6 +117,7 @@ type HoldingsTableProps = {
   onToggleCostOfCapitalCol?: () => void;
   onFilterTypeChange: (value: string) => void;
   onCycleSortOrder: () => void;
+  onSymbolClick?: (holding: HoldingItem) => void;
   onAdd?: () => void;
   onEdit?: (holding: HoldingItem) => void;
   onDelete?: (id: number) => void;
@@ -144,6 +145,7 @@ export default function HoldingsTable({
   onTogglePriceCol,
   onToggleCostOfCapitalCol,
   onFilterTypeChange,
+  onSymbolClick,
   onAdd,
   onEdit,
   onDelete,
@@ -439,7 +441,17 @@ export default function HoldingsTable({
                     {sortedFilteredHoldings.map(({ holding, unrealizedPnL, realizedPnL, totalPnL, unrealizedPnLPercent, xirrAnnual, xirrMonthly, weight }) => (
                       <tr key={holding.id}>
                         <td className={compactCellClass}>
-                          <p className="text-sm font-medium">{holding.symbol}</p>
+                          {onSymbolClick ? (
+                            <button
+                              type="button"
+                              onClick={() => onSymbolClick(holding)}
+                              className="text-sm font-medium hover:text-primary hover:underline transition-colors text-left"
+                            >
+                              {holding.symbol}
+                            </button>
+                          ) : (
+                            <p className="text-sm font-medium">{holding.symbol}</p>
+                          )}
                       {!readOnly && (
                         <div className="flex items-center gap-1 mt-0.5">
                           <ChangeChip change={holding.change} changePercent={holding.changePercent} />

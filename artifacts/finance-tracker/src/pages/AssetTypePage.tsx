@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { usePortfolioData, usePortfolioMutations } from "@/hooks/use-portfolio";
+import { usePortfolioData } from "@/hooks/use-portfolio";
 import AllocationChart from "@/pages/assets/AllocationChart";
 import HoldingsTable from "@/pages/assets/HoldingsTable";
 import PerformanceChart from "@/pages/assets/PerformanceChart";
@@ -19,7 +19,6 @@ export default function AssetTypePage() {
   const [, navigate] = useLocation();
   const [snapshotRange, setSnapshotRange] = useState<SnapshotRange>("1m");
   const { summary, snapshots, holdings: holdingsFromApi, isLoading, isError, error } = usePortfolioData(snapshotRange);
-  const { refreshPrices } = usePortfolioMutations();
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [holdingsCollapsed, setHoldingsCollapsed] = useState<boolean>(
     () => localStorage.getItem("holdings_collapsed") !== "0"
@@ -130,33 +129,7 @@ export default function AssetTypePage() {
     localStorage.setItem("col_cost_of_capital", value ? "1" : "0");
   };
 
-  const handleRefresh = () => {
-    refreshPrices.mutate();
-  };
 
-  const handleExportCSV = () => {
-    if (!typeHoldings.length) return;
-    const formatNumber = (value: number) => value.toLocaleString("vi-VN");
-    const header = ["symbol", "type", "quantity", "current_price", "total_value", "cost_of_capital"];
-    const rows = typeHoldings.map((holding) => [
-      holding.symbol,
-      holding.type,
-      holding.quantity != null ? formatNumber(holding.quantity) : "",
-      holding.currentPrice != null ? formatNumber(holding.currentPrice) : "",
-      holding.currentValue != null ? formatNumber(Math.round(holding.currentValue)) : "",
-      holding.costOfCapital != null ? formatNumber(Math.round(holding.costOfCapital)) : "",
-    ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `danh-muc-${normalizedType}-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
 
   const handleOpenDetailType = (type: string) => {
     navigate(`/assets/type/${encodeURIComponent(type)}`);
@@ -197,20 +170,6 @@ export default function AssetTypePage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => navigate("/assets")} className="text-xs h-8">
-              ← Back
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshPrices.isPending} className="text-xs h-8">
-              {refreshPrices.isPending ? "..." : "↻ Refresh"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={!typeHoldings.length} className="text-xs h-8">
-              ↓ Export
-            </Button>
-            <span className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground">
-              Source: Investment sheet
-            </span>
-          </div>
         </div>
       </header>
 
