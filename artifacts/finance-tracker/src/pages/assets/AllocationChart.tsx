@@ -13,17 +13,17 @@ const PIE_COLORS = [
   "hsl(0, 72%, 60%)",
 ];
 
-const TARGETS_SETTING_KEY = "allocation_targets";
+const DEFAULT_TARGETS_KEY = "allocation_targets";
 
-async function fetchTargets(): Promise<Record<string, number>> {
-  const res = await fetch(`/api/settings/${TARGETS_SETTING_KEY}`);
+async function fetchTargets(key: string): Promise<Record<string, number>> {
+  const res = await fetch(`/api/settings/${key}`);
   if (!res.ok) return {};
   const data = await res.json();
   try { return JSON.parse(data.value); } catch { return {}; }
 }
 
-async function saveTargets(targets: Record<string, number>): Promise<void> {
-  await fetch(`/api/settings/${TARGETS_SETTING_KEY}`, {
+async function saveTargets(key: string, targets: Record<string, number>): Promise<void> {
+  await fetch(`/api/settings/${key}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ value: JSON.stringify(targets) }),
@@ -40,6 +40,7 @@ type AllocationChartProps = {
   comparisonTotalValue?: number;
   comparisonShareLabel?: string;
   showTargets?: boolean;
+  targetsSettingKey?: string;
 };
 
 export default function AllocationChart({
@@ -52,6 +53,7 @@ export default function AllocationChart({
   comparisonTotalValue,
   comparisonShareLabel = "Total Share",
   showTargets = false,
+  targetsSettingKey = DEFAULT_TARGETS_KEY,
 }: AllocationChartProps) {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [editingType, setEditingType] = useState<string | null>(null);
@@ -60,14 +62,14 @@ export default function AllocationChart({
   const queryClient = useQueryClient();
 
   const targetsQuery = useQuery({
-    queryKey: ["allocation_targets"],
-    queryFn: fetchTargets,
+    queryKey: ["allocation_targets", targetsSettingKey],
+    queryFn: () => fetchTargets(targetsSettingKey),
     enabled: showTargets,
   });
 
   const saveMutation = useMutation({
-    mutationFn: saveTargets,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["allocation_targets"] }),
+    mutationFn: (targets: Record<string, number>) => saveTargets(targetsSettingKey, targets),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["allocation_targets", targetsSettingKey] }),
   });
 
   const targets = targetsQuery.data ?? {};
@@ -206,7 +208,8 @@ export default function AllocationChart({
               const rateAsset = totalPortfolioValue && totalPortfolioValue > 0
                 ? (entry.value / totalPortfolioValue) * 100
                 : null;
-              const deviation = target != null && rateAsset != null ? rateAsset - target : null;
+              const deviationBasis = rateAsset ?? entry.pct;
+              const deviation = target != null ? deviationBasis - target : null;
               return (
                 <tr
                   key={entry.type}

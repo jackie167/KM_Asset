@@ -277,6 +277,8 @@ export default function WealthAllocationPage() {
                     holdings={allocationHoldings}
                     totalValue={totalValue}
                     onTypeSelect={handleOpenAssetType}
+                    showTargets
+                    targetsSettingKey="wealth_allocation_targets"
                   />
                 )}
                 {holdings.length > 0 && (
