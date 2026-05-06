@@ -188,6 +188,7 @@ export default function AssetTypePage() {
                     title="Detail Allocation"
                     groupBy={normalizedType === "real_estate" ? (holding) => holding.symbol : undefined}
                     onTypeSelect={normalizedType === "real_estate" ? undefined : handleOpenDetailType}
+                    showTargets={normalizedType === "financial"}
                   />
                 )}
                 <PerformanceChart

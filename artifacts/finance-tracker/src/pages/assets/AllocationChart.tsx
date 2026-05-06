@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, Cell, LabelList, Tooltip, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { Card } from "@/components/ui/card";
 import type { HoldingItem } from "@/pages/assets/types";
@@ -12,6 +13,23 @@ const PIE_COLORS = [
   "hsl(0, 72%, 60%)",
 ];
 
+const TARGETS_SETTING_KEY = "allocation_targets";
+
+async function fetchTargets(): Promise<Record<string, number>> {
+  const res = await fetch(`/api/settings/${TARGETS_SETTING_KEY}`);
+  if (!res.ok) return {};
+  const data = await res.json();
+  try { return JSON.parse(data.value); } catch { return {}; }
+}
+
+async function saveTargets(targets: Record<string, number>): Promise<void> {
+  await fetch(`/api/settings/${TARGETS_SETTING_KEY}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: JSON.stringify(targets) }),
+  });
+}
+
 type AllocationChartProps = {
   holdings: HoldingItem[];
   totalValue: number;
@@ -20,6 +38,7 @@ type AllocationChartProps = {
   groupBy?: (holding: HoldingItem) => string;
   comparisonTotalValue?: number;
   comparisonShareLabel?: string;
+  showTargets?: boolean;
 };
 
 export default function AllocationChart({
@@ -30,8 +49,39 @@ export default function AllocationChart({
   groupBy = (holding) => holding.type.toLowerCase(),
   comparisonTotalValue,
   comparisonShareLabel = "Total Share",
+  showTargets = false,
 }: AllocationChartProps) {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [editingType, setEditingType] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const queryClient = useQueryClient();
+
+  const targetsQuery = useQuery({
+    queryKey: ["allocation_targets"],
+    queryFn: fetchTargets,
+    enabled: showTargets,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: saveTargets,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["allocation_targets"] }),
+  });
+
+  const targets = targetsQuery.data ?? {};
+
+  function startEdit(type: string, current: number | undefined) {
+    setEditingType(type);
+    setEditValue(current != null ? String(current) : "");
+  }
+
+  function submitEdit(type: string) {
+    const val = parseFloat(editValue.replace(",", "."));
+    if (!isNaN(val) && val >= 0 && val <= 100) {
+      saveMutation.mutate({ ...targets, [type]: val });
+    }
+    setEditingType(null);
+  }
 
   const data = useMemo(() => {
     const typeMap = new Map<string, number>();
@@ -133,42 +183,87 @@ export default function AllocationChart({
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead>
             <tr className="text-[9px] text-muted-foreground uppercase tracking-wider">
-              <th className="py-1.5 pr-6 text-left font-normal border-b border-border">Asset Type</th>
-              <th className="py-1.5 px-4 text-center font-normal border-b border-border">Share</th>
-              {comparisonTotalValue != null && (
-                <th className="py-1.5 px-4 text-center font-normal border-b border-border">{comparisonShareLabel}</th>
+              <th className="py-1.5 pr-4 text-left font-normal border-b border-border">Asset Type</th>
+              <th className="py-1.5 px-3 text-center font-normal border-b border-border">Share</th>
+              {showTargets && (
+                <>
+                  <th className="py-1.5 px-3 text-center font-normal border-b border-border">Target</th>
+                  <th className="py-1.5 px-3 text-center font-normal border-b border-border">Deviation</th>
+                </>
               )}
-              <th className="py-1.5 pl-6 text-right font-normal border-b border-border">Value</th>
+              {comparisonTotalValue != null && (
+                <th className="py-1.5 px-3 text-center font-normal border-b border-border">{comparisonShareLabel}</th>
+              )}
+              <th className="py-1.5 pl-4 text-right font-normal border-b border-border">Value</th>
             </tr>
           </thead>
           <tbody>
-            {data.map((entry, index) => (
-              <tr
-                key={entry.type}
-                className={`${index < data.length - 1 ? "border-b border-border" : ""} ${
-                  onTypeSelect ? "cursor-pointer hover:bg-muted/40 transition-colors" : ""
-                }`}
-                onClick={() => onTypeSelect?.(entry.type)}
-              >
-                <td className="py-2.5 pr-6">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: entry.color }} />
-                    <span className="text-sm font-medium whitespace-nowrap">{entry.name}</span>
-                  </div>
-                </td>
-                <td className="py-2.5 px-4 text-[11px] text-center tabular-nums font-medium">
-                  {entry.pct.toFixed(1)}%
-                </td>
-                {comparisonTotalValue != null && (
-                  <td className="py-2.5 px-4 text-[11px] text-center tabular-nums text-muted-foreground">
-                    {entry.comparisonPct != null ? `${entry.comparisonPct.toFixed(1)}%` : "—"}
+            {data.map((entry, index) => {
+              const target = targets[entry.type];
+              const deviation = target != null ? entry.pct - target : null;
+              return (
+                <tr
+                  key={entry.type}
+                  className={`${index < data.length - 1 ? "border-b border-border" : ""} ${
+                    onTypeSelect ? "cursor-pointer hover:bg-muted/40 transition-colors" : ""
+                  }`}
+                  onClick={() => onTypeSelect?.(entry.type)}
+                >
+                  <td className="py-2.5 pr-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: entry.color }} />
+                      <span className="text-sm font-medium whitespace-nowrap">{entry.name}</span>
+                    </div>
                   </td>
-                )}
-                <td className="py-2.5 pl-6 text-[11px] font-semibold text-right tabular-nums whitespace-nowrap">
-                  {formatVNDFull(entry.value)}
-                </td>
-              </tr>
-            ))}
+                  <td className="py-2.5 px-3 text-[11px] text-center tabular-nums font-medium">
+                    {entry.pct.toFixed(1)}%
+                  </td>
+                  {showTargets && (
+                    <>
+                      <td
+                        className="py-2.5 px-3 text-center"
+                        onClick={(e) => { e.stopPropagation(); startEdit(entry.type, target); }}
+                      >
+                        {editingType === entry.type ? (
+                          <input
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={() => submitEdit(entry.type)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") submitEdit(entry.type);
+                              if (e.key === "Escape") setEditingType(null);
+                            }}
+                            className="w-14 text-center text-[11px] bg-muted border border-primary rounded px-1 py-0.5 tabular-nums outline-none"
+                          />
+                        ) : (
+                          <span className="text-[11px] tabular-nums cursor-text text-muted-foreground hover:text-foreground transition-colors">
+                            {target != null ? `${target.toFixed(1)}%` : <span className="text-border">—</span>}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-[11px] text-center tabular-nums font-medium">
+                        {deviation != null ? (
+                          <span className={deviation >= 0 ? "text-emerald-400" : "text-red-400"}>
+                            {deviation >= 0 ? "+" : ""}{deviation.toFixed(1)}%
+                          </span>
+                        ) : (
+                          <span className="text-border">—</span>
+                        )}
+                      </td>
+                    </>
+                  )}
+                  {comparisonTotalValue != null && (
+                    <td className="py-2.5 px-3 text-[11px] text-center tabular-nums text-muted-foreground">
+                      {entry.comparisonPct != null ? `${entry.comparisonPct.toFixed(1)}%` : "—"}
+                    </td>
+                  )}
+                  <td className="py-2.5 pl-4 text-[11px] font-semibold text-right tabular-nums whitespace-nowrap">
+                    {formatVNDFull(entry.value)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
