@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation, useRoute } from "wouter";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,19 @@ export default function AssetTypePage() {
   const [showCostOfCapitalCol, setShowCostOfCapitalCol] = useState<boolean>(
     () => localStorage.getItem("col_cost_of_capital") !== "0"
   );
+
+  const totalPortfolioQuery = useQuery({
+    queryKey: ["settings", "portfolio_live_total"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/portfolio_live_total");
+      if (!res.ok) return null;
+      const data = await res.json();
+      const v = parseFloat(data.value);
+      return isNaN(v) ? null : v;
+    },
+    enabled: true,
+  });
+  const totalPortfolioValue = totalPortfolioQuery.data ?? undefined;
 
   const normalizedType = (params?.type ?? "").toLowerCase();
   const isInvestmentGroupPage = normalizedType === "financial" || normalizedType === "real_estate";
@@ -189,6 +203,7 @@ export default function AssetTypePage() {
                     groupBy={normalizedType === "real_estate" ? (holding) => holding.symbol : undefined}
                     onTypeSelect={normalizedType === "real_estate" ? undefined : handleOpenDetailType}
                     showTargets={normalizedType === "financial"}
+                    totalPortfolioValue={normalizedType === "financial" ? totalPortfolioValue : undefined}
                   />
                 )}
                 <PerformanceChart
