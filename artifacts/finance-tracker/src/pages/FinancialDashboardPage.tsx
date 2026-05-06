@@ -177,12 +177,12 @@ function SummaryPanel({ title, rows }: { title: string; rows: SummaryRow[] }) {
       <div className="divide-y divide-border/40">
         {rows.map((row) => {
           const content = (
-            <div className={`flex items-center justify-between gap-2 py-2 first:pt-1 last:pb-1 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
-              <p className="text-xs text-muted-foreground shrink-0">{row.label}</p>
+            <div className={`flex items-center justify-between gap-2 py-2.5 first:pt-1 last:pb-1 ${row.href ? "hover:bg-muted/30 -mx-2 px-2 rounded-md transition cursor-pointer" : ""}`}>
+              <p className="text-sm text-muted-foreground shrink-0">{row.label}</p>
               {row.loading ? (
-                <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+                <div className="h-5 w-24 rounded bg-muted animate-pulse" />
               ) : (
-                <p className={`text-sm font-semibold tabular-nums text-right ${TONE_CLASS[row.tone ?? "neutral"]}`}>
+                <p className={`text-base font-bold tabular-nums text-right ${TONE_CLASS[row.tone ?? "neutral"]}`}>
                   {row.value}
                 </p>
               )}
