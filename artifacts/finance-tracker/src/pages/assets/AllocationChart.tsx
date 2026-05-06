@@ -226,7 +226,10 @@ export default function AllocationChart({
                   </td>
                   {showTargets && (
                     <>
-                      <td className="py-2.5 px-3 text-[11px] text-center tabular-nums text-muted-foreground">
+                      <td
+                        className="py-2.5 px-3 text-[11px] text-center tabular-nums text-muted-foreground"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {rateAsset != null ? `${rateAsset.toFixed(1)}%` : <span className="text-border">—</span>}
                       </td>
                       <td
@@ -251,7 +254,7 @@ export default function AllocationChart({
                           </span>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 text-[11px] text-center tabular-nums font-medium">
+                      <td className="py-2.5 px-3 text-[11px] text-center tabular-nums font-medium" onClick={(e) => e.stopPropagation()}>
                         {deviation != null ? (
                           <span className={deviation >= 0 ? "text-emerald-400" : "text-red-400"}>
                             {deviation >= 0 ? "+" : ""}{deviation.toFixed(1)}%
