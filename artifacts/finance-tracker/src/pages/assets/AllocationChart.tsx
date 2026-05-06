@@ -39,6 +39,7 @@ type AllocationChartProps = {
   comparisonTotalValue?: number;
   comparisonShareLabel?: string;
   showTargets?: boolean;
+  hideShare?: boolean;
   targetsSettingKey?: string;
 };
 
@@ -51,6 +52,7 @@ export default function AllocationChart({
   comparisonTotalValue,
   comparisonShareLabel = "Total Share",
   showTargets = false,
+  hideShare = false,
   targetsSettingKey = DEFAULT_TARGETS_KEY,
 }: AllocationChartProps) {
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
@@ -186,7 +188,7 @@ export default function AllocationChart({
           <thead>
             <tr className="text-[9px] text-muted-foreground uppercase tracking-wider">
               <th className="py-1.5 pr-4 text-left font-normal border-b border-border">Asset Type</th>
-              <th className="py-1.5 px-3 text-center font-normal border-b border-border">Share</th>
+              {!hideShare && <th className="py-1.5 px-3 text-center font-normal border-b border-border">Share</th>}
               {showTargets && (
                 <>
                   <th className="py-1.5 px-3 text-center font-normal border-b border-border">Target</th>
@@ -217,9 +219,11 @@ export default function AllocationChart({
                       <span className="text-sm font-medium whitespace-nowrap">{entry.name}</span>
                     </div>
                   </td>
-                  <td className="py-2.5 px-3 text-[11px] text-center tabular-nums font-medium">
-                    {entry.pct.toFixed(1)}%
-                  </td>
+                  {!hideShare && (
+                    <td className="py-2.5 px-3 text-[11px] text-center tabular-nums font-medium">
+                      {entry.pct.toFixed(1)}%
+                    </td>
+                  )}
                   {showTargets && (
                     <>
                       <td

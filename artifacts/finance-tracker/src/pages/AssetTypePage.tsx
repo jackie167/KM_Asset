@@ -190,6 +190,7 @@ export default function AssetTypePage() {
                     groupBy={normalizedType === "real_estate" ? (holding) => holding.symbol : undefined}
                     onTypeSelect={normalizedType === "real_estate" ? undefined : handleOpenDetailType}
                     showTargets={normalizedType === "financial"}
+                    hideShare={normalizedType === "financial"}
                   />
                 )}
                 <PerformanceChart
